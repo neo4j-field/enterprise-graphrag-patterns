@@ -229,6 +229,8 @@ Other practical considerations:
 - Rebuild or reconcile materialized domain relationships periodically because they are derived data.
 - Benchmark the customer’s real read and write workloads before deciding whether projection metadata such as `supportCount` is worth maintaining.
 
+The DOC-1 and DOC-2 saved queries are separate only to make the walkthrough easy to follow. They use the same idempotent ingestion structure with different values. A production loader should implement that structure once as a parameterized query and apply it to every input row or batch.
+
 Relationship-property uniqueness constraints used by the demo are available from Neo4j 5.7 onward.
 
 ## Optional extension: contradictory publications

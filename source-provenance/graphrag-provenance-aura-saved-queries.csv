@@ -32,8 +32,10 @@ SET d.title = 'Migraine therapies', d.version = 1
 MERGE (c:Chunk {chunkId: 'DOC-2-C1'})
 SET c.text = 'Migraine may be treated with aspirin.'
 MERGE (c)-[:PART_OF]->(d)
-MATCH (drug:Drug {entityId: 'DRUG-ASPIRIN'})
-MATCH (indication:Indication {entityId: 'IND-MIGRAINE'})
+MERGE (drug:Entity:Drug {entityId: 'DRUG-ASPIRIN'})
+  ON CREATE SET drug.name = 'Aspirin'
+MERGE (indication:Entity:Indication {entityId: 'IND-MIGRAINE'})
+  ON CREATE SET indication.name = 'Migraine'
 MERGE (c)-[:MENTIONS {start: 29, end: 36}]->(drug)
 MERGE (c)-[:MENTIONS {start: 0, end: 8}]->(indication)
 MERGE (drug)-[r:TREATS]->(indication)
@@ -96,9 +98,9 @@ SET source.factId = 'DRUG-ASPIRIN|TREATS|IND-MIGRAINE',
     source.extractorVersion = 'demo-v1'
 MERGE (drug)-[r:TREATS {factId: 'DRUG-ASPIRIN|TREATS|IND-MIGRAINE'}]->(indication)
 WITH drug, indication, r
-MATCH (drug)-[support:TREATS_SOURCE]->(indication)
-WHERE support.factId = r.factId
-WITH r, count(support) AS supportCount
+MATCH (drug)-[currentSource:TREATS_SOURCE]->(indication)
+WHERE currentSource.factId = r.factId
+WITH r, count(currentSource) AS supportCount
 SET r.supportCount = supportCount;
 ",12,10,false
 Step 3 - Add DOC-2,Idempotently create a second source relationship while reusing the canonical relationship.,"MERGE (d:Document {documentId: 'DOC-2'})
@@ -106,18 +108,21 @@ SET d.title = 'Migraine therapies', d.version = 1
 MERGE (c:Chunk {chunkId: 'DOC-2-C1'})
 SET c.text = 'Migraine may be treated with aspirin.'
 MERGE (c)-[:PART_OF]->(d)
-MATCH (drug:Drug {entityId: 'DRUG-ASPIRIN'})
-MATCH (indication:Indication {entityId: 'IND-MIGRAINE'})
+MERGE (drug:Entity:Drug {entityId: 'DRUG-ASPIRIN'})
+  ON CREATE SET drug.name = 'Aspirin'
+MERGE (indication:Entity:Indication {entityId: 'IND-MIGRAINE'})
+  ON CREATE SET indication.name = 'Migraine'
 MERGE (c)-[:MENTIONS {start: 29, end: 36}]->(drug)
 MERGE (c)-[:MENTIONS {start: 0, end: 8}]->(indication)
 MERGE (drug)-[source:TREATS_SOURCE {sourceId: 'DOC-2-C1|TREATS'}]->(indication)
 SET source.factId = 'DRUG-ASPIRIN|TREATS|IND-MIGRAINE',
     source.chunkId = 'DOC-2-C1', source.confidence = 0.84,
     source.extractorVersion = 'demo-v1'
-MATCH (drug)-[r:TREATS {factId: 'DRUG-ASPIRIN|TREATS|IND-MIGRAINE'}]->(indication)
-MATCH (drug)-[source:TREATS_SOURCE]->(indication)
-WHERE source.factId = r.factId
-WITH r, count(source) AS supportCount
+MERGE (drug)-[r:TREATS {factId: 'DRUG-ASPIRIN|TREATS|IND-MIGRAINE'}]->(indication)
+WITH drug, indication, r
+MATCH (drug)-[currentSource:TREATS_SOURCE]->(indication)
+WHERE currentSource.factId = r.factId
+WITH r, count(currentSource) AS supportCount
 SET r.supportCount = supportCount;
 ",13,10,false
 Step 4 - Display the complete graph,Visualize source-specific and canonical relationships together.,"MATCH p=()-[]->()
@@ -181,14 +186,14 @@ MERGE (f:Fact {factId: 'DRUG-ASPIRIN|TREATS|IND-MIGRAINE'})
 MERGE (f)-[:SUBJECT]->(drug)
 MERGE (f)-[:OBJECT]->(indication)
 MERGE (c)-[support:SUPPORTS {
-  supportId: 'DOC-1-C1|DRUG-ASPIRIN|TREATS|IND-MIGRAINE|RUN-1'
+  supportId: 'DOC-1-C1|RUN-1|OCC-1'
 }]->(f)
 SET support.confidence = 0.91, support.extractorVersion = 'demo-v1',
     support.extractionRunId = 'RUN-1'
 MERGE (drug)-[r:TREATS {factId: f.factId}]->(indication)
 WITH f, r
-MATCH (:Chunk)-[current:SUPPORTS]->(f)
-WITH r, count(current) AS supportCount
+MATCH (:Chunk)-[currentSupport:SUPPORTS]->(f)
+WITH r, count(currentSupport) AS supportCount
 SET r.supportCount = supportCount;
 ",22,20,false
 Step 3 - Add DOC-2,Idempotently reuse the Fact and native relationship and add independent support.,"MERGE (d:Document {documentId: 'DOC-2'})
@@ -196,19 +201,26 @@ SET d.title = 'Migraine therapies', d.version = 1
 MERGE (c:Chunk {chunkId: 'DOC-2-C1'})
 SET c.text = 'Migraine may be treated with aspirin.'
 MERGE (c)-[:PART_OF]->(d)
-MATCH (drug:Drug {entityId: 'DRUG-ASPIRIN'})
-MATCH (indication:Indication {entityId: 'IND-MIGRAINE'})
+MERGE (drug:Entity:Drug {entityId: 'DRUG-ASPIRIN'})
+  ON CREATE SET drug.name = 'Aspirin'
+MERGE (indication:Entity:Indication {entityId: 'IND-MIGRAINE'})
+  ON CREATE SET indication.name = 'Migraine'
 MERGE (c)-[:MENTIONS {start: 29, end: 36}]->(drug)
 MERGE (c)-[:MENTIONS {start: 0, end: 8}]->(indication)
-MATCH (f:Fact {factId: 'DRUG-ASPIRIN|TREATS|IND-MIGRAINE'})
+MERGE (f:Fact {factId: 'DRUG-ASPIRIN|TREATS|IND-MIGRAINE'})
+  ON CREATE SET f.predicate = 'TREATS', f.polarity = 'POSITIVE',
+                f.normalizationVersion = 'demo-normalizer-v1'
+MERGE (f)-[:SUBJECT]->(drug)
+MERGE (f)-[:OBJECT]->(indication)
 MERGE (c)-[support:SUPPORTS {
-  supportId: 'DOC-2-C1|DRUG-ASPIRIN|TREATS|IND-MIGRAINE|RUN-1'
+  supportId: 'DOC-2-C1|RUN-1|OCC-1'
 }]->(f)
 SET support.confidence = 0.84, support.extractorVersion = 'demo-v1',
     support.extractionRunId = 'RUN-1'
-MATCH (drug)-[r:TREATS {factId: f.factId}]->(indication)
-MATCH (:Chunk)-[support:SUPPORTS]->(f)
-WITH r, count(support) AS supportCount
+MERGE (drug)-[r:TREATS {factId: f.factId}]->(indication)
+WITH f, r
+MATCH (:Chunk)-[currentSupport:SUPPORTS]->(f)
+WITH r, count(currentSupport) AS supportCount
 SET r.supportCount = supportCount;
 ",23,20,false
 Step 4 - Display the complete graph,Visualize the provenance layer and its native query projection.,"MATCH p=()-[]->()
@@ -241,8 +253,7 @@ WITH d, collect(DISTINCT c) AS chunks,
      [id IN collect(DISTINCT entity.entityId) WHERE id IS NOT NULL] AS entityIds
 FOREACH (c IN chunks | DETACH DELETE c)
 DETACH DELETE d
-CALL {
-  WITH factIds
+CALL (factIds) {
   UNWIND factIds AS factId
   MATCH (f:Fact {factId: factId})
   MATCH (f)-[:SUBJECT]->(subject:Entity)
@@ -269,7 +280,8 @@ SET d.title = 'Aspirin for pain', d.version = 2
 MERGE (c:Chunk {chunkId: 'DOC-1-C1'})
 SET c.text = 'Aspirin treats pain.'
 MERGE (c)-[:PART_OF]->(d)
-MATCH (drug:Drug {entityId: 'DRUG-ASPIRIN'})
+MERGE (drug:Entity:Drug {entityId: 'DRUG-ASPIRIN'})
+  ON CREATE SET drug.name = 'Aspirin'
 MERGE (indication:Entity:Indication {entityId: 'IND-PAIN'})
   ON CREATE SET indication.name = 'Pain'
 MERGE (c)-[:MENTIONS {start: 0, end: 7}]->(drug)
@@ -280,14 +292,14 @@ MERGE (f:Fact {factId: 'DRUG-ASPIRIN|TREATS|IND-PAIN'})
 MERGE (f)-[:SUBJECT]->(drug)
 MERGE (f)-[:OBJECT]->(indication)
 MERGE (c)-[support:SUPPORTS {
-  supportId: 'DOC-1-C1|DRUG-ASPIRIN|TREATS|IND-PAIN|RUN-2'
+  supportId: 'DOC-1-C1|RUN-2|OCC-1'
 }]->(f)
 SET support.confidence = 0.95, support.extractorVersion = 'demo-v2',
     support.extractionRunId = 'RUN-2'
 MERGE (drug)-[r:TREATS {factId: f.factId}]->(indication)
 WITH f, r
-MATCH (:Chunk)-[current:SUPPORTS]->(f)
-WITH r, count(current) AS supportCount
+MATCH (:Chunk)-[currentSupport:SUPPORTS]->(f)
+WITH r, count(currentSupport) AS supportCount
 SET r.supportCount = supportCount;
 ",28,20,false
 Step 9 - Display the update,See migraine retained by DOC-2 and pain introduced by DOC-1 version 2.,"MATCH p=()-[]->()
@@ -301,8 +313,7 @@ WITH d, collect(DISTINCT c) AS chunks,
      [id IN collect(DISTINCT entity.entityId) WHERE id IS NOT NULL] AS entityIds
 FOREACH (c IN chunks | DETACH DELETE c)
 DETACH DELETE d
-CALL {
-  WITH factIds
+CALL (factIds) {
   UNWIND factIds AS factId
   MATCH (f:Fact {factId: factId})
   MATCH (f)-[:SUBJECT]->(subject:Entity)
@@ -380,11 +391,17 @@ SET d.title = 'Migraine therapies', d.version = 1
 MERGE (c:Chunk {chunkId: 'DOC-2-C1'})
 SET c.text = 'Migraine may be treated with aspirin.'
 MERGE (c)-[:PART_OF]->(d)
-MATCH (drug:Drug {entityId: 'DRUG-ASPIRIN'})
-MATCH (indication:Indication {entityId: 'IND-MIGRAINE'})
+MERGE (drug:Entity:Drug {entityId: 'DRUG-ASPIRIN'})
+  ON CREATE SET drug.name = 'Aspirin'
+MERGE (indication:Entity:Indication {entityId: 'IND-MIGRAINE'})
+  ON CREATE SET indication.name = 'Migraine'
 MERGE (c)-[:MENTIONS {start: 29, end: 36}]->(drug)
 MERGE (c)-[:MENTIONS {start: 0, end: 8}]->(indication)
-MATCH (f:Fact {factId: 'DRUG-ASPIRIN|TREATS|IND-MIGRAINE'})
+MERGE (f:Fact {factId: 'DRUG-ASPIRIN|TREATS|IND-MIGRAINE'})
+  ON CREATE SET f.predicate = 'TREATS', f.polarity = 'POSITIVE',
+                f.normalizationVersion = 'demo-normalizer-v1'
+MERGE (f)-[:SUBJECT]->(drug)
+MERGE (f)-[:OBJECT]->(indication)
 MERGE (e:Evidence {evidenceId: 'DOC-2-C1-E1'})
 ON CREATE SET e.reviewStatus = 'UNREVIEWED'
 SET e.quotation = 'Migraine may be treated with aspirin.',
@@ -393,9 +410,10 @@ SET e.quotation = 'Migraine may be treated with aspirin.',
     e.page = 3, e.section = 'Results'
 MERGE (c)-[:HAS_EVIDENCE]->(e)
 MERGE (e)-[:SUPPORTS]->(f)
-MATCH (drug)-[r:TREATS {factId: f.factId}]->(indication)
-MATCH (:Evidence)-[:SUPPORTS]->(f)
-WITH r, count(*) AS supportCount
+MERGE (drug)-[r:TREATS {factId: f.factId}]->(indication)
+WITH f, r
+MATCH (current:Evidence)-[:SUPPORTS]->(f)
+WITH r, count(current) AS supportCount
 SET r.supportCount = supportCount;
 ",43,40,false
 Step 4 - Display the complete graph,Visualize documents entity mentions Evidence Fact and native projection.,"MATCH p=()-[]->()
@@ -435,8 +453,7 @@ WITH d, collect(DISTINCT c) AS chunks, collect(DISTINCT e) AS evidence,
 FOREACH (e IN evidence | DETACH DELETE e)
 FOREACH (c IN chunks | DETACH DELETE c)
 DETACH DELETE d
-CALL {
-  WITH factIds
+CALL (factIds) {
   UNWIND factIds AS factId
   MATCH (f:Fact {factId: factId})
   MATCH (f)-[:SUBJECT]->(subject:Entity)
