@@ -24,9 +24,9 @@ MERGE (acet:Entity:Drug {entityId: 'DRUG-ACETAMINOPHEN'})
 SET acet.name = 'Acetaminophen', acet.standardConceptId = 'DEMO-DRUG-001'
 MERGE (fever:Entity:Indication {entityId: 'IND-FEVER'}) SET fever.name = 'Fever'
 MERGE (f1:Fact {factId: 'DRUG-PARACETAMOL|TREATS|IND-FEVER'})
-SET f1.predicate = 'TREATS', f1.polarity = 'POSITIVE'
+SET f1.predicate = 'TREATS'
 MERGE (f2:Fact {factId: 'DRUG-ACETAMINOPHEN|TREATS|IND-FEVER'})
-SET f2.predicate = 'TREATS', f2.polarity = 'POSITIVE'
+SET f2.predicate = 'TREATS'
 MERGE (c1)-[:PART_OF]->(d1)
 MERGE (c2)-[:PART_OF]->(d2)
 MERGE (c1)-[mp:MENTIONS {mentionId: 'M-PARA'}]->(para)
@@ -157,9 +157,9 @@ MERGE (acet:Entity:Drug {entityId: 'DRUG-ACETAMINOPHEN'})
 SET acet.name = 'Acetaminophen', acet.standardConceptId = 'DEMO-DRUG-001'
 MERGE (fever:Entity:Indication {entityId: 'IND-FEVER'}) SET fever.name = 'Fever'
 MERGE (f1:Fact {factId: 'DRUG-PARACETAMOL|TREATS|IND-FEVER'})
-SET f1.predicate = 'TREATS', f1.polarity = 'POSITIVE'
+SET f1.predicate = 'TREATS'
 MERGE (f2:Fact {factId: 'DRUG-ACETAMINOPHEN|TREATS|IND-FEVER'})
-SET f2.predicate = 'TREATS', f2.polarity = 'POSITIVE'
+SET f2.predicate = 'TREATS'
 MERGE (c1)-[:PART_OF]->(d1)
 MERGE (c2)-[:PART_OF]->(d2)
 MERGE (c1)-[:HAS_MENTION]->(m1)
@@ -260,7 +260,7 @@ SET acet.aliases = []
 MERGE (para:Entity:Drug {entityId: 'DRUG-PARACETAMOL'})
   ON MATCH SET para.name = 'Paracetamol'
 MERGE (f1:Fact {factId: 'DRUG-PARACETAMOL|TREATS|IND-FEVER'})
-SET f1.predicate = 'TREATS', f1.polarity = 'POSITIVE'
+SET f1.predicate = 'TREATS'
 MERGE (f1)-[:SUBJECT]->(para)
 MERGE (f1)-[:OBJECT]->(fever)
 WITH f1, acet
@@ -330,9 +330,9 @@ SET mf1.surfaceForm = 'fever', mf1.proposedType = 'Indication', mf1.start = 19, 
 MERGE (mf2:EntityMention {mentionId: 'M-FEVER-2'})
 SET mf2.surfaceForm = 'fever', mf2.proposedType = 'Indication', mf2.start = 21, mf2.end = 26
 MERGE (f1:Fact {factId: 'DRUG-PARACETAMOL|TREATS|IND-FEVER'})
-SET f1.predicate = 'TREATS', f1.polarity = 'POSITIVE'
+SET f1.predicate = 'TREATS'
 MERGE (f2:Fact {factId: 'DRUG-ACETAMINOPHEN|TREATS|IND-FEVER'})
-SET f2.predicate = 'TREATS', f2.polarity = 'POSITIVE'
+SET f2.predicate = 'TREATS'
 MERGE (terminology)-[mt:MEMBER_OF]->(clusterA) SET mt.method = 'source-import'
 MERGE (regulatory)-[mr:MEMBER_OF]->(clusterP) SET mr.method = 'source-import'
 MERGE (m1)-[mm1:MEMBER_OF]->(clusterP) SET mm1.method = 'initial-name-match'
@@ -450,7 +450,7 @@ MERGE (restored)-[:MATERIALIZES]->(loser);
 MATCH (para:Entity {entityId: 'DRUG-PARACETAMOL'}),
       (fever:Entity {entityId: 'IND-FEVER'})
 MERGE (f1:Fact {factId: 'DRUG-PARACETAMOL|TREATS|IND-FEVER'})
-SET f1.predicate = 'TREATS', f1.polarity = 'POSITIVE'
+SET f1.predicate = 'TREATS'
 MERGE (f1)-[:SUBJECT]->(para)
 MERGE (f1)-[:OBJECT]->(fever)
 WITH f1
@@ -508,9 +508,9 @@ MERGE (para:Entity:Drug {entityId: 'DRUG-PARACETAMOL'}) SET para.name = 'Paracet
 MERGE (acet:Entity:Drug {entityId: 'DRUG-ACETAMINOPHEN'}) SET acet.name = 'Acetaminophen'
 MERGE (fever:Entity:Indication {entityId: 'IND-FEVER'}) SET fever.name = 'Fever'
 MERGE (f1:Fact {factId: 'DRUG-PARACETAMOL|TREATS|IND-FEVER'})
-SET f1.predicate = 'TREATS', f1.polarity = 'POSITIVE'
+SET f1.predicate = 'TREATS'
 MERGE (f2:Fact {factId: 'DRUG-ACETAMINOPHEN|TREATS|IND-FEVER'})
-SET f2.predicate = 'TREATS', f2.polarity = 'POSITIVE'
+SET f2.predicate = 'TREATS'
 MERGE (decision:ResolutionDecision {decisionId: 'DEC-MERGE-001'})
 ON CREATE SET decision.action = 'MERGE', decision.status = 'PROPOSED',
               decision.method = 'ensemble', decision.resolverVersion = 'demo-resolver-v1',
@@ -621,7 +621,7 @@ SET para.resolutionStatus = 'CANONICAL', acet.aliases = [];
 MATCH (para:Entity {entityId: 'DRUG-PARACETAMOL'}),
       (fever:Entity {entityId: 'IND-FEVER'})
 MERGE (f1:Fact {factId: 'DRUG-PARACETAMOL|TREATS|IND-FEVER'})
-SET f1.predicate = 'TREATS', f1.polarity = 'POSITIVE'
+SET f1.predicate = 'TREATS'
 MERGE (f1)-[:SUBJECT]->(para)
 MERGE (f1)-[:OBJECT]->(fever)
 WITH f1

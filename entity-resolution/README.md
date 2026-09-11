@@ -1,6 +1,8 @@
 # Entity resolution and post-processing patterns for Neo4j GraphRAG
 
-This demo answers a common enterprise GraphRAG question:
+[← All enterprise GraphRAG patterns](../README.md)
+
+This pattern answers a common enterprise GraphRAG question:
 
 > What happens to mentions, facts, relationships, and provenance when two entities are resolved as the same real-world thing—and how can that decision later be corrected?
 
@@ -245,7 +247,9 @@ For document deletion, start from an indexed `documentId`, traverse to its chunk
 
 At larger scale, deterministic IDs, uniqueness constraints, idempotent writes, bounded transactions, and projection reconciliation are essential. Highly connected canonical entities can become write hotspots, so mutable aggregates such as `supportCount` may be maintained asynchronously or in batches.
 
-## Import and run
+## Run this pattern
+
+See the repository [import and run instructions](../README.md#import-and-run) for shared requirements and the database reset warning.
 
 Import `graphrag-entity-resolution-aura-saved-queries.csv` into the saved queries area of the Neo4j Aura console. It creates one top-level folder containing four model folders.
 

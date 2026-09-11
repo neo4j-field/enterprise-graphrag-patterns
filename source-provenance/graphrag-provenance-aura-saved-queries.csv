@@ -1,7 +1,8 @@
 name,description,query,id,parentId,isFolder
-GraphRAG provenance demo,Four provenance models with the same deduplicated native query graph.,,0,,true
+Source provenance patterns,Four provenance models with the same deduplicated native query graph.,,0,,true
 1 - Source array,A single native TREATS relationship contains an array of supporting chunk IDs.,,1,0,true
-Step 1 - Reset and constrain,Delete the demo graph and create stable entity identifiers.,"MATCH (n) DETACH DELETE n;
+Step 1 - Reset and constrain,Delete the demo graph and create stable entity identifiers.,"// Reset only a disposable demo database.
+MATCH (n) DETACH DELETE n;
 
 CREATE CONSTRAINT document_id IF NOT EXISTS
 FOR (d:Document) REQUIRE d.documentId IS UNIQUE;
@@ -19,8 +20,8 @@ MERGE (drug:Entity:Drug {entityId: 'DRUG-ASPIRIN'})
   ON CREATE SET drug.name = 'Aspirin'
 MERGE (indication:Entity:Indication {entityId: 'IND-MIGRAINE'})
   ON CREATE SET indication.name = 'Migraine'
-MERGE (c)-[:MENTIONS {start: 0, end: 7}]->(drug)
-MERGE (c)-[:MENTIONS {start: 15, end: 23}]->(indication)
+MERGE (c)-[:MENTIONS {mentionId: 'DOC-1-C1|RUN-1|MENTION-1', start: 0, end: 7}]->(drug)
+MERGE (c)-[:MENTIONS {mentionId: 'DOC-1-C1|RUN-1|MENTION-2', start: 15, end: 23}]->(indication)
 MERGE (drug)-[r:TREATS]->(indication)
 SET r.sourceChunkIds = CASE
   WHEN c.chunkId IN coalesce(r.sourceChunkIds, []) THEN r.sourceChunkIds
@@ -36,8 +37,8 @@ MERGE (drug:Entity:Drug {entityId: 'DRUG-ASPIRIN'})
   ON CREATE SET drug.name = 'Aspirin'
 MERGE (indication:Entity:Indication {entityId: 'IND-MIGRAINE'})
   ON CREATE SET indication.name = 'Migraine'
-MERGE (c)-[:MENTIONS {start: 29, end: 36}]->(drug)
-MERGE (c)-[:MENTIONS {start: 0, end: 8}]->(indication)
+MERGE (c)-[:MENTIONS {mentionId: 'DOC-2-C1|RUN-1|MENTION-1', start: 29, end: 36}]->(drug)
+MERGE (c)-[:MENTIONS {mentionId: 'DOC-2-C1|RUN-1|MENTION-2', start: 0, end: 8}]->(indication)
 MERGE (drug)-[r:TREATS]->(indication)
 SET r.sourceChunkIds = CASE
   WHEN c.chunkId IN coalesce(r.sourceChunkIds, []) THEN r.sourceChunkIds
@@ -50,7 +51,8 @@ RETURN p;
 Step 5 - Query the domain graph,The application query uses one native relationship and no provenance nodes.,"MATCH p=(drug:Drug)-[r:TREATS]->(indication:Indication)
 RETURN p;
 ",6,1,false
-Step 6 - Delete DOC-1,Remove DOC-1 and its values from shared relationship arrays.,"MATCH (c:Chunk)-[:PART_OF]->(d:Document {documentId: 'DOC-1'})
+Step 6 - Delete DOC-1,Remove DOC-1 and its values from shared relationship arrays.,"// Array provenance requires editing every affected shared relationship.
+MATCH (c:Chunk)-[:PART_OF]->(d:Document {documentId: 'DOC-1'})
 WITH d, collect(c) AS chunks, collect(c.chunkId) AS removedChunkIds
 FOREACH (c IN chunks | DETACH DELETE c)
 DETACH DELETE d
@@ -66,7 +68,8 @@ Step 7 - Verify the result,DOC-2 and the canonical TREATS relationship remain.,"
 RETURN p, r.sourceChunkIds AS remainingSources;
 ",8,1,false
 2 - Source relationships,Source-specific native relationships coexist with one canonical native relationship.,,10,0,true
-Step 1 - Reset and constrain,Delete the demo graph and constrain stable IDs including relationship IDs.,"MATCH (n) DETACH DELETE n;
+Step 1 - Reset and constrain,Delete the demo graph and constrain stable IDs including relationship IDs.,"// Reset only a disposable demo database.
+MATCH (n) DETACH DELETE n;
 
 CREATE CONSTRAINT document_id IF NOT EXISTS
 FOR (d:Document) REQUIRE d.documentId IS UNIQUE;
@@ -90,8 +93,8 @@ MERGE (drug:Entity:Drug {entityId: 'DRUG-ASPIRIN'})
   ON CREATE SET drug.name = 'Aspirin'
 MERGE (indication:Entity:Indication {entityId: 'IND-MIGRAINE'})
   ON CREATE SET indication.name = 'Migraine'
-MERGE (c)-[:MENTIONS {start: 0, end: 7}]->(drug)
-MERGE (c)-[:MENTIONS {start: 15, end: 23}]->(indication)
+MERGE (c)-[:MENTIONS {mentionId: 'DOC-1-C1|RUN-1|MENTION-1', start: 0, end: 7}]->(drug)
+MERGE (c)-[:MENTIONS {mentionId: 'DOC-1-C1|RUN-1|MENTION-2', start: 15, end: 23}]->(indication)
 MERGE (drug)-[source:TREATS_SOURCE {sourceId: 'DOC-1-C1|TREATS'}]->(indication)
 SET source.factId = 'DRUG-ASPIRIN|TREATS|IND-MIGRAINE',
     source.chunkId = 'DOC-1-C1', source.confidence = 0.91,
@@ -112,8 +115,8 @@ MERGE (drug:Entity:Drug {entityId: 'DRUG-ASPIRIN'})
   ON CREATE SET drug.name = 'Aspirin'
 MERGE (indication:Entity:Indication {entityId: 'IND-MIGRAINE'})
   ON CREATE SET indication.name = 'Migraine'
-MERGE (c)-[:MENTIONS {start: 29, end: 36}]->(drug)
-MERGE (c)-[:MENTIONS {start: 0, end: 8}]->(indication)
+MERGE (c)-[:MENTIONS {mentionId: 'DOC-2-C1|RUN-1|MENTION-1', start: 29, end: 36}]->(drug)
+MERGE (c)-[:MENTIONS {mentionId: 'DOC-2-C1|RUN-1|MENTION-2', start: 0, end: 8}]->(indication)
 MERGE (drug)-[source:TREATS_SOURCE {sourceId: 'DOC-2-C1|TREATS'}]->(indication)
 SET source.factId = 'DRUG-ASPIRIN|TREATS|IND-MIGRAINE',
     source.chunkId = 'DOC-2-C1', source.confidence = 0.84,
@@ -131,7 +134,8 @@ RETURN p;
 Step 5 - Query the domain graph,The application ignores TREATS_SOURCE and uses only TREATS.,"MATCH p=(drug:Drug)-[r:TREATS]->(indication:Indication)
 RETURN p;
 ",15,10,false
-Step 6 - Delete DOC-1,Delete its source relationships then update only the touched canonical relationship.,"MATCH (c:Chunk)-[:PART_OF]->(d:Document {documentId: 'DOC-1'})
+Step 6 - Delete DOC-1,Delete its source relationships then update only the touched canonical relationship.,"// Relationship properties are the only link back to source chunks in this model.
+MATCH (c:Chunk)-[:PART_OF]->(d:Document {documentId: 'DOC-1'})
 WITH d, collect(c) AS chunks, collect(c.chunkId) AS chunkIds
 MATCH ()-[source:TREATS_SOURCE]->()
 WHERE source.chunkId IN chunkIds
@@ -154,7 +158,8 @@ WHERE source.factId = r.factId
 RETURN p, r.supportCount AS supportCount, collect(source.chunkId) AS remainingSources;
 ",17,10,false
 3 - Fact plus query graph,Canonical Fact nodes manage provenance and materialize native domain relationships.,,20,0,true
-Step 1 - Reset and constrain,Delete the demo graph and constrain all stable identifiers.,"MATCH (n) DETACH DELETE n;
+Step 1 - Reset and constrain,Delete the demo graph and constrain all stable identifiers.,"// Reset only a disposable demo database.
+MATCH (n) DETACH DELETE n;
 
 CREATE CONSTRAINT document_id IF NOT EXISTS
 FOR (d:Document) REQUIRE d.documentId IS UNIQUE;
@@ -169,7 +174,8 @@ FOR ()-[r:SUPPORTS]-() REQUIRE r.supportId IS UNIQUE;
 CREATE CONSTRAINT treats_fact_id IF NOT EXISTS
 FOR ()-[r:TREATS]-() REQUIRE r.factId IS UNIQUE;
 ",21,20,false
-Step 2 - Add DOC-1,Idempotently create entity provenance one Fact one support and one native projection.,"MERGE (d:Document {documentId: 'DOC-1'})
+Step 2 - Add DOC-1,Idempotently create entity provenance one Fact one support and one native projection.,"// One occurrence supports one canonical Fact; TREATS is derived query data.
+MERGE (d:Document {documentId: 'DOC-1'})
 SET d.title = 'Aspirin for migraine', d.version = 1
 MERGE (c:Chunk {chunkId: 'DOC-1-C1'})
 SET c.text = 'Aspirin treats migraine.'
@@ -178,17 +184,18 @@ MERGE (drug:Entity:Drug {entityId: 'DRUG-ASPIRIN'})
   ON CREATE SET drug.name = 'Aspirin'
 MERGE (indication:Entity:Indication {entityId: 'IND-MIGRAINE'})
   ON CREATE SET indication.name = 'Migraine'
-MERGE (c)-[:MENTIONS {start: 0, end: 7}]->(drug)
-MERGE (c)-[:MENTIONS {start: 15, end: 23}]->(indication)
+MERGE (c)-[:MENTIONS {mentionId: 'DOC-1-C1|RUN-1|MENTION-1', start: 0, end: 7}]->(drug)
+MERGE (c)-[:MENTIONS {mentionId: 'DOC-1-C1|RUN-1|MENTION-2', start: 15, end: 23}]->(indication)
 MERGE (f:Fact {factId: 'DRUG-ASPIRIN|TREATS|IND-MIGRAINE'})
-  ON CREATE SET f.predicate = 'TREATS', f.polarity = 'POSITIVE',
-                f.normalizationVersion = 'demo-normalizer-v1'
+  ON CREATE SET f.predicate = 'TREATS'
 MERGE (f)-[:SUBJECT]->(drug)
 MERGE (f)-[:OBJECT]->(indication)
 MERGE (c)-[support:SUPPORTS {
   supportId: 'DOC-1-C1|RUN-1|OCC-1'
 }]->(f)
-SET support.confidence = 0.91, support.extractorVersion = 'demo-v1',
+SET support.subjectMentionId = 'DOC-1-C1|RUN-1|MENTION-1',
+    support.objectMentionId = 'DOC-1-C1|RUN-1|MENTION-2',
+    support.confidence = 0.91, support.extractorVersion = 'demo-v1',
     support.extractionRunId = 'RUN-1'
 MERGE (drug)-[r:TREATS {factId: f.factId}]->(indication)
 WITH f, r
@@ -196,7 +203,8 @@ MATCH (:Chunk)-[currentSupport:SUPPORTS]->(f)
 WITH r, count(currentSupport) AS supportCount
 SET r.supportCount = supportCount;
 ",22,20,false
-Step 3 - Add DOC-2,Idempotently reuse the Fact and native relationship and add independent support.,"MERGE (d:Document {documentId: 'DOC-2'})
+Step 3 - Add DOC-2,Idempotently reuse the Fact and native relationship and add independent support.,"// A second occurrence reuses the Fact and increments only its projection metadata.
+MERGE (d:Document {documentId: 'DOC-2'})
 SET d.title = 'Migraine therapies', d.version = 1
 MERGE (c:Chunk {chunkId: 'DOC-2-C1'})
 SET c.text = 'Migraine may be treated with aspirin.'
@@ -205,17 +213,18 @@ MERGE (drug:Entity:Drug {entityId: 'DRUG-ASPIRIN'})
   ON CREATE SET drug.name = 'Aspirin'
 MERGE (indication:Entity:Indication {entityId: 'IND-MIGRAINE'})
   ON CREATE SET indication.name = 'Migraine'
-MERGE (c)-[:MENTIONS {start: 29, end: 36}]->(drug)
-MERGE (c)-[:MENTIONS {start: 0, end: 8}]->(indication)
+MERGE (c)-[:MENTIONS {mentionId: 'DOC-2-C1|RUN-1|MENTION-1', start: 29, end: 36}]->(drug)
+MERGE (c)-[:MENTIONS {mentionId: 'DOC-2-C1|RUN-1|MENTION-2', start: 0, end: 8}]->(indication)
 MERGE (f:Fact {factId: 'DRUG-ASPIRIN|TREATS|IND-MIGRAINE'})
-  ON CREATE SET f.predicate = 'TREATS', f.polarity = 'POSITIVE',
-                f.normalizationVersion = 'demo-normalizer-v1'
+  ON CREATE SET f.predicate = 'TREATS'
 MERGE (f)-[:SUBJECT]->(drug)
 MERGE (f)-[:OBJECT]->(indication)
 MERGE (c)-[support:SUPPORTS {
   supportId: 'DOC-2-C1|RUN-1|OCC-1'
 }]->(f)
-SET support.confidence = 0.84, support.extractorVersion = 'demo-v1',
+SET support.subjectMentionId = 'DOC-2-C1|RUN-1|MENTION-1',
+    support.objectMentionId = 'DOC-2-C1|RUN-1|MENTION-2',
+    support.confidence = 0.84, support.extractorVersion = 'demo-v1',
     support.extractionRunId = 'RUN-1'
 MERGE (drug)-[r:TREATS {factId: f.factId}]->(indication)
 WITH f, r
@@ -231,7 +240,9 @@ MATCH (f)-[:SUBJECT]->(subject:Entity)
 MATCH (f)-[:OBJECT]->(object:Entity)
 RETURN subject.name AS subject, f.predicate AS predicate, object.name AS object,
        count(DISTINCT d) AS documentCount,
-       collect({document: d.documentId, chunk: c.chunkId, confidence: s.confidence,
+       collect({document: d.documentId, chunk: c.chunkId,
+                subjectMentionId: s.subjectMentionId,
+                objectMentionId: s.objectMentionId, confidence: s.confidence,
                 extractorVersion: s.extractorVersion,
                 extractionRunId: s.extractionRunId}) AS sources;
 ",25,20,false
@@ -243,9 +254,12 @@ MATCH (f:Fact {factId: r.factId})<-[s:SUPPORTS]-(c:Chunk)-[:PART_OF]->(d:Documen
 RETURN drug.name AS subject, type(r) AS predicate, indication.name AS object,
        d.documentId AS documentId, d.title AS source, c.chunkId AS chunkId,
        c.text AS excerpt, s.confidence AS confidence,
-       s.extractorVersion AS extractorVersion;
+       s.extractorVersion AS extractorVersion,
+       s.subjectMentionId AS subjectMentionId,
+       s.objectMentionId AS objectMentionId;
 ",32,20,false
-Step 7 - Update DOC-1 part 1,Remove DOC-1 then clean up only the Facts and entities touched by its chunks.,"MATCH (d:Document {documentId: 'DOC-1'})<-[:PART_OF]-(c:Chunk)
+Step 7 - Update DOC-1 part 1,Remove DOC-1 then clean up only the Facts and entities touched by its chunks.,"// Capture touched IDs before deleting document-owned chunks and supports.
+MATCH (d:Document {documentId: 'DOC-1'})<-[:PART_OF]-(c:Chunk)
 OPTIONAL MATCH (c)-[:MENTIONS]->(entity:Entity)
 OPTIONAL MATCH (c)-[:SUPPORTS]->(f:Fact)
 WITH d, collect(DISTINCT c) AS chunks,
@@ -254,6 +268,7 @@ WITH d, collect(DISTINCT c) AS chunks,
 FOREACH (c IN chunks | DETACH DELETE c)
 DETACH DELETE d
 CALL (factIds) {
+  // Reconcile only touched Facts and their native projections.
   UNWIND factIds AS factId
   MATCH (f:Fact {factId: factId})
   MATCH (f)-[:SUBJECT]->(subject:Entity)
@@ -275,7 +290,8 @@ WHERE NOT EXISTS { MATCH (:Chunk)-[:MENTIONS]->(entity) }
   AND NOT EXISTS { MATCH (:Fact)-[:SUBJECT|OBJECT]->(entity) }
 DETACH DELETE entity;
 ",27,20,false
-Step 8 - Update DOC-1 part 2,Idempotently ingest version 2 which now states that aspirin treats pain.,"MERGE (d:Document {documentId: 'DOC-1'})
+Step 8 - Update DOC-1 part 2,Idempotently ingest version 2 which now states that aspirin treats pain.,"// Replacement ingestion uses the same structure as initial ingestion.
+MERGE (d:Document {documentId: 'DOC-1'})
 SET d.title = 'Aspirin for pain', d.version = 2
 MERGE (c:Chunk {chunkId: 'DOC-1-C1'})
 SET c.text = 'Aspirin treats pain.'
@@ -284,17 +300,18 @@ MERGE (drug:Entity:Drug {entityId: 'DRUG-ASPIRIN'})
   ON CREATE SET drug.name = 'Aspirin'
 MERGE (indication:Entity:Indication {entityId: 'IND-PAIN'})
   ON CREATE SET indication.name = 'Pain'
-MERGE (c)-[:MENTIONS {start: 0, end: 7}]->(drug)
-MERGE (c)-[:MENTIONS {start: 15, end: 19}]->(indication)
+MERGE (c)-[:MENTIONS {mentionId: 'DOC-1-C1|RUN-2|MENTION-1', start: 0, end: 7}]->(drug)
+MERGE (c)-[:MENTIONS {mentionId: 'DOC-1-C1|RUN-2|MENTION-2', start: 15, end: 19}]->(indication)
 MERGE (f:Fact {factId: 'DRUG-ASPIRIN|TREATS|IND-PAIN'})
-  ON CREATE SET f.predicate = 'TREATS', f.polarity = 'POSITIVE',
-                f.normalizationVersion = 'demo-normalizer-v1'
+  ON CREATE SET f.predicate = 'TREATS'
 MERGE (f)-[:SUBJECT]->(drug)
 MERGE (f)-[:OBJECT]->(indication)
 MERGE (c)-[support:SUPPORTS {
   supportId: 'DOC-1-C1|RUN-2|OCC-1'
 }]->(f)
-SET support.confidence = 0.95, support.extractorVersion = 'demo-v2',
+SET support.subjectMentionId = 'DOC-1-C1|RUN-2|MENTION-1',
+    support.objectMentionId = 'DOC-1-C1|RUN-2|MENTION-2',
+    support.confidence = 0.95, support.extractorVersion = 'demo-v2',
     support.extractionRunId = 'RUN-2'
 MERGE (drug)-[r:TREATS {factId: f.factId}]->(indication)
 WITH f, r
@@ -305,7 +322,8 @@ SET r.supportCount = supportCount;
 Step 9 - Display the update,See migraine retained by DOC-2 and pain introduced by DOC-1 version 2.,"MATCH p=()-[]->()
 RETURN p;
 ",29,20,false
-Step 10 - Delete DOC-1,Delete the replacement and clean up only its unsupported Fact projection and entities.,"MATCH (d:Document {documentId: 'DOC-1'})<-[:PART_OF]-(c:Chunk)
+Step 10 - Delete DOC-1,Delete the replacement and clean up only its unsupported Fact projection and entities.,"// Capture touched IDs before deleting document-owned chunks and supports.
+MATCH (d:Document {documentId: 'DOC-1'})<-[:PART_OF]-(c:Chunk)
 OPTIONAL MATCH (c)-[:MENTIONS]->(entity:Entity)
 OPTIONAL MATCH (c)-[:SUPPORTS]->(f:Fact)
 WITH d, collect(DISTINCT c) AS chunks,
@@ -314,6 +332,7 @@ WITH d, collect(DISTINCT c) AS chunks,
 FOREACH (c IN chunks | DETACH DELETE c)
 DETACH DELETE d
 CALL (factIds) {
+  // Reconcile only touched Facts and their native projections.
   UNWIND factIds AS factId
   MATCH (f:Fact {factId: factId})
   MATCH (f)-[:SUBJECT]->(subject:Entity)
@@ -339,7 +358,8 @@ Step 11 - Verify the result,The application still sees the migraine relationship
 RETURN p, r.supportCount AS supportCount;
 ",31,20,false
 4 - Fact Evidence and query graph,Explicit Evidence nodes add an independent extraction lifecycle to the recommended pattern.,,40,0,true
-Step 1 - Reset and constrain,Delete the demo graph and constrain all stable identifiers.,"MATCH (n) DETACH DELETE n;
+Step 1 - Reset and constrain,Delete the demo graph and constrain all stable identifiers.,"// Reset only a disposable demo database.
+MATCH (n) DETACH DELETE n;
 
 CREATE CONSTRAINT document_id IF NOT EXISTS
 FOR (d:Document) REQUIRE d.documentId IS UNIQUE;
@@ -347,16 +367,17 @@ CREATE CONSTRAINT chunk_id IF NOT EXISTS
 FOR (c:Chunk) REQUIRE c.chunkId IS UNIQUE;
 CREATE CONSTRAINT entity_id IF NOT EXISTS
 FOR (e:Entity) REQUIRE e.entityId IS UNIQUE;
+CREATE CONSTRAINT mention_id IF NOT EXISTS
+FOR (m:EntityMention) REQUIRE m.mentionId IS UNIQUE;
 CREATE CONSTRAINT fact_id IF NOT EXISTS
 FOR (f:Fact) REQUIRE f.factId IS UNIQUE;
 CREATE CONSTRAINT evidence_id IF NOT EXISTS
 FOR (e:Evidence) REQUIRE e.evidenceId IS UNIQUE;
-CREATE CONSTRAINT support_id IF NOT EXISTS
-FOR ()-[r:SUPPORTS]-() REQUIRE r.supportId IS UNIQUE;
 CREATE CONSTRAINT treats_fact_id IF NOT EXISTS
 FOR ()-[r:TREATS]-() REQUIRE r.factId IS UNIQUE;
 ",41,40,false
-Step 2 - Add DOC-1,Idempotently create one detailed Evidence item and materialize its Fact as TREATS.,"MERGE (d:Document {documentId: 'DOC-1'})
+Step 2 - Add DOC-1,Idempotently create one detailed Evidence item and materialize its Fact as TREATS.,"// Evidence is first-class because it has role bindings and its own review lifecycle.
+MERGE (d:Document {documentId: 'DOC-1'})
 SET d.title = 'Aspirin for migraine', d.version = 1
 MERGE (c:Chunk {chunkId: 'DOC-1-C1'})
 SET c.text = 'Aspirin treats migraine.'
@@ -365,20 +386,26 @@ MERGE (drug:Entity:Drug {entityId: 'DRUG-ASPIRIN'})
   ON CREATE SET drug.name = 'Aspirin'
 MERGE (indication:Entity:Indication {entityId: 'IND-MIGRAINE'})
   ON CREATE SET indication.name = 'Migraine'
-MERGE (c)-[:MENTIONS {start: 0, end: 7}]->(drug)
-MERGE (c)-[:MENTIONS {start: 15, end: 23}]->(indication)
+MERGE (subjectMention:EntityMention {mentionId: 'DOC-1-C1|RUN-1|MENTION-1'})
+SET subjectMention.surfaceForm = 'Aspirin', subjectMention.start = 0, subjectMention.end = 7
+MERGE (objectMention:EntityMention {mentionId: 'DOC-1-C1|RUN-1|MENTION-2'})
+SET objectMention.surfaceForm = 'migraine', objectMention.start = 15, objectMention.end = 23
+MERGE (c)-[:HAS_MENTION]->(subjectMention)
+MERGE (c)-[:HAS_MENTION]->(objectMention)
+MERGE (subjectMention)-[:RESOLVED_TO]->(drug)
+MERGE (objectMention)-[:RESOLVED_TO]->(indication)
 MERGE (f:Fact {factId: 'DRUG-ASPIRIN|TREATS|IND-MIGRAINE'})
-  ON CREATE SET f.predicate = 'TREATS', f.polarity = 'POSITIVE',
-                f.normalizationVersion = 'demo-normalizer-v1'
+  ON CREATE SET f.predicate = 'TREATS'
 MERGE (f)-[:SUBJECT]->(drug)
 MERGE (f)-[:OBJECT]->(indication)
-MERGE (e:Evidence {evidenceId: 'DOC-1-C1-E1'})
+MERGE (e:Evidence {evidenceId: 'DOC-1-C1|RUN-1|OCC-1'})
 ON CREATE SET e.reviewStatus = 'UNREVIEWED'
 SET e.quotation = 'Aspirin treats migraine.',
-    e.subjectStart = 0, e.subjectEnd = 7, e.objectStart = 15, e.objectEnd = 23,
     e.confidence = 0.91, e.extractorVersion = 'demo-v1', e.extractionRunId = 'RUN-1',
     e.page = 1, e.section = 'Abstract'
 MERGE (c)-[:HAS_EVIDENCE]->(e)
+MERGE (e)-[:SUBJECT_MENTION]->(subjectMention)
+MERGE (e)-[:OBJECT_MENTION]->(objectMention)
 MERGE (e)-[:SUPPORTS]->(f)
 MERGE (drug)-[r:TREATS {factId: f.factId}]->(indication)
 WITH f, r
@@ -386,7 +413,8 @@ MATCH (current:Evidence)-[:SUPPORTS]->(f)
 WITH r, count(current) AS supportCount
 SET r.supportCount = supportCount;
 ",42,40,false
-Step 3 - Add DOC-2,Idempotently create independent Evidence while reusing the Fact and native relationship.,"MERGE (d:Document {documentId: 'DOC-2'})
+Step 3 - Add DOC-2,Idempotently create independent Evidence while reusing the Fact and native relationship.,"// A second Evidence item reuses the canonical Fact but keeps its own occurrence data.
+MERGE (d:Document {documentId: 'DOC-2'})
 SET d.title = 'Migraine therapies', d.version = 1
 MERGE (c:Chunk {chunkId: 'DOC-2-C1'})
 SET c.text = 'Migraine may be treated with aspirin.'
@@ -395,20 +423,26 @@ MERGE (drug:Entity:Drug {entityId: 'DRUG-ASPIRIN'})
   ON CREATE SET drug.name = 'Aspirin'
 MERGE (indication:Entity:Indication {entityId: 'IND-MIGRAINE'})
   ON CREATE SET indication.name = 'Migraine'
-MERGE (c)-[:MENTIONS {start: 29, end: 36}]->(drug)
-MERGE (c)-[:MENTIONS {start: 0, end: 8}]->(indication)
+MERGE (subjectMention:EntityMention {mentionId: 'DOC-2-C1|RUN-1|MENTION-1'})
+SET subjectMention.surfaceForm = 'aspirin', subjectMention.start = 29, subjectMention.end = 36
+MERGE (objectMention:EntityMention {mentionId: 'DOC-2-C1|RUN-1|MENTION-2'})
+SET objectMention.surfaceForm = 'Migraine', objectMention.start = 0, objectMention.end = 8
+MERGE (c)-[:HAS_MENTION]->(subjectMention)
+MERGE (c)-[:HAS_MENTION]->(objectMention)
+MERGE (subjectMention)-[:RESOLVED_TO]->(drug)
+MERGE (objectMention)-[:RESOLVED_TO]->(indication)
 MERGE (f:Fact {factId: 'DRUG-ASPIRIN|TREATS|IND-MIGRAINE'})
-  ON CREATE SET f.predicate = 'TREATS', f.polarity = 'POSITIVE',
-                f.normalizationVersion = 'demo-normalizer-v1'
+  ON CREATE SET f.predicate = 'TREATS'
 MERGE (f)-[:SUBJECT]->(drug)
 MERGE (f)-[:OBJECT]->(indication)
-MERGE (e:Evidence {evidenceId: 'DOC-2-C1-E1'})
+MERGE (e:Evidence {evidenceId: 'DOC-2-C1|RUN-1|OCC-1'})
 ON CREATE SET e.reviewStatus = 'UNREVIEWED'
 SET e.quotation = 'Migraine may be treated with aspirin.',
-    e.subjectStart = 29, e.subjectEnd = 36, e.objectStart = 0, e.objectEnd = 8,
     e.confidence = 0.84, e.extractorVersion = 'demo-v1', e.extractionRunId = 'RUN-1',
     e.page = 3, e.section = 'Results'
 MERGE (c)-[:HAS_EVIDENCE]->(e)
+MERGE (e)-[:SUBJECT_MENTION]->(subjectMention)
+MERGE (e)-[:OBJECT_MENTION]->(objectMention)
 MERGE (e)-[:SUPPORTS]->(f)
 MERGE (drug)-[r:TREATS {factId: f.factId}]->(indication)
 WITH f, r
@@ -419,17 +453,22 @@ SET r.supportCount = supportCount;
 Step 4 - Display the complete graph,Visualize documents entity mentions Evidence Fact and native projection.,"MATCH p=()-[]->()
 RETURN p;
 ",44,40,false
-Step 5 - Review Evidence,Give one extraction occurrence its own review state.,"MATCH (e:Evidence {evidenceId: 'DOC-1-C1-E1'})
+Step 5 - Review Evidence,Give one extraction occurrence its own review state.,"// The review addresses one occurrence without changing the canonical Fact.
+MATCH (e:Evidence {evidenceId: 'DOC-1-C1|RUN-1|OCC-1'})
 SET e.reviewStatus = 'ACCEPTED',
     e.reviewedBy = 'demo-reviewer',
     e.reviewedAt = datetime()
 RETURN e;
 ",45,40,false
 Step 6 - Inspect provenance,Return detailed source records for the canonical Fact.,"MATCH (d:Document)<-[:PART_OF]-(c:Chunk)-[:HAS_EVIDENCE]->(e:Evidence)-[:SUPPORTS]->(f:Fact)
+MATCH (e)-[:SUBJECT_MENTION]->(subjectMention:EntityMention)
+MATCH (e)-[:OBJECT_MENTION]->(objectMention:EntityMention)
 MATCH (f)-[:SUBJECT]->(subject:Entity)
 MATCH (f)-[:OBJECT]->(object:Entity)
 RETURN subject.name AS subject, f.predicate AS predicate, object.name AS object,
        collect({document: d.documentId, evidence: e.evidenceId,
+                subjectMention: subjectMention.surfaceForm,
+                objectMention: objectMention.surfaceForm,
                 quote: e.quotation, confidence: e.confidence,
                 extractorVersion: e.extractorVersion, page: e.page,
                 section: e.section, reviewStatus: e.reviewStatus}) AS evidence;
@@ -439,21 +478,29 @@ RETURN p;
 ",47,40,false
 Step 7b - Cite the domain relationship,Traverse from the native query graph to its detailed Evidence and source documents.,"MATCH (drug:Drug)-[r:TREATS]->(indication:Indication)
 MATCH (f:Fact {factId: r.factId})<-[:SUPPORTS]-(e:Evidence)<-[:HAS_EVIDENCE]-(c:Chunk)-[:PART_OF]->(d:Document)
+MATCH (e)-[:SUBJECT_MENTION]->(subjectMention:EntityMention)
+MATCH (e)-[:OBJECT_MENTION]->(objectMention:EntityMention)
 RETURN drug.name AS subject, type(r) AS predicate, indication.name AS object,
        d.documentId AS documentId, d.title AS source, c.chunkId AS chunkId,
        e.quotation AS excerpt, e.confidence AS confidence,
-       e.extractorVersion AS extractorVersion, e.reviewStatus AS reviewStatus;
+       e.extractorVersion AS extractorVersion, e.reviewStatus AS reviewStatus,
+       subjectMention.mentionId AS subjectMentionId,
+       objectMention.mentionId AS objectMentionId;
 ",50,40,false
-Step 8 - Delete DOC-1,Delete its Evidence and update only the Fact projection and entities it touched.,"MATCH (d:Document {documentId: 'DOC-1'})<-[:PART_OF]-(c:Chunk)
-OPTIONAL MATCH (c)-[:MENTIONS]->(entity:Entity)
+Step 8 - Delete DOC-1,Delete its Evidence mentions and update only the Fact projection and entities it touched.,"// Capture touched IDs before deleting document-owned Evidence and mentions.
+MATCH (d:Document {documentId: 'DOC-1'})<-[:PART_OF]-(c:Chunk)
+OPTIONAL MATCH (c)-[:HAS_MENTION]->(mention:EntityMention)-[:RESOLVED_TO]->(entity:Entity)
 OPTIONAL MATCH (c)-[:HAS_EVIDENCE]->(e:Evidence)-[:SUPPORTS]->(f:Fact)
-WITH d, collect(DISTINCT c) AS chunks, collect(DISTINCT e) AS evidence,
+WITH d, collect(DISTINCT c) AS chunks, collect(DISTINCT mention) AS mentions,
+     collect(DISTINCT e) AS evidence,
      [id IN collect(DISTINCT f.factId) WHERE id IS NOT NULL] AS factIds,
      [id IN collect(DISTINCT entity.entityId) WHERE id IS NOT NULL] AS entityIds
 FOREACH (e IN evidence | DETACH DELETE e)
+FOREACH (mention IN mentions | DETACH DELETE mention)
 FOREACH (c IN chunks | DETACH DELETE c)
 DETACH DELETE d
 CALL (factIds) {
+  // Reconcile only touched Facts and their native projections.
   UNWIND factIds AS factId
   MATCH (f:Fact {factId: factId})
   MATCH (f)-[:SUBJECT]->(subject:Entity)
@@ -471,7 +518,7 @@ CALL (factIds) {
 WITH entityIds
 UNWIND entityIds AS entityId
 MATCH (entity:Entity {entityId: entityId})
-WHERE NOT EXISTS { MATCH (:Chunk)-[:MENTIONS]->(entity) }
+WHERE NOT EXISTS { MATCH (:EntityMention)-[:RESOLVED_TO]->(entity) }
   AND NOT EXISTS { MATCH (:Fact)-[:SUBJECT|OBJECT]->(entity) }
 DETACH DELETE entity;
 ",48,40,false

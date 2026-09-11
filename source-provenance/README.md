@@ -1,6 +1,8 @@
-# GraphRAG provenance patterns for Neo4j Aura
+# Source provenance patterns for Neo4j GraphRAG
 
-This demo answers a common GraphRAG lifecycle question:
+[← All enterprise GraphRAG patterns](../README.md)
+
+This pattern answers a common GraphRAG lifecycle question:
 
 > After extracting a domain graph from document chunks, how can we trace every entity and relationship back to its sources, update or delete a document safely, and still expose a deduplicated graph that is easy to query at scale?
 
@@ -27,20 +29,24 @@ Applications do not need to traverse `Fact` or `Evidence` nodes. Those nodes bel
 
 ## Common entity provenance
 
-Every model uses the same document, chunk, and entity structure:
+Models 1–3 use a compact mention relationship:
 
 ```text
 (Chunk)-[:PART_OF]->(Document)
-(Chunk)-[:MENTIONS {start, end, confidence}]->(Entity)
+(Chunk)-[:MENTIONS {mentionId, start, end, confidence}]->(Entity)
 ```
 
 `MENTIONS` is preferable to saying that a canonical entity was `EXTRACTED_FROM` a chunk. The chunk contains an occurrence that was resolved to the shared entity; the entity itself may already exist because another document mentioned it.
 
 `start` is the inclusive character offset and `end` is the exclusive character offset inside `Chunk.text`. For `Aspirin treats migraine.`, `{start: 0, end: 7}` identifies `Aspirin`. Production models may use clearer names such as `startOffset` and `endOffset`.
 
-If individual mentions require their own identity, correction, or review lifecycle, reify them as `Mention` nodes. A relationship is sufficient for the simpler case.
+`mentionId` identifies the extraction occurrence. Model 3 also records the subject and object mention IDs on `SUPPORTS`, so a later entity split can route each support occurrence correctly.
+
+If mentions require their own correction or review lifecycle, reify them as `EntityMention` nodes. Model 4 does this because its Evidence explicitly binds the subject and object mention occurrences.
 
 ## Four provenance models
+
+The models are alternatives selected by lifecycle requirements, not a maturity ladder that every project must follow. Each model below states when to use it and what additional capability or cost it introduces.
 
 ### 1. Source IDs in one canonical relationship
 
@@ -51,6 +57,10 @@ If individual mentions require their own identity, correction, or review lifecyc
 This produces the desired query graph with no duplicate `TREATS` relationships, but the provenance is an array on a shared relationship. Removing a document means finding and editing array values. Per-source confidence and extraction metadata are awkward to represent, and popular facts can become write hotspots.
 
 This model is included as the tempting baseline, not as the recommendation.
+
+**Use when:** the graph is small, sources per relationship remain bounded, and per-source lifecycle operations are rare.
+
+**What it gives up:** independently addressable source occurrences and efficient source-scoped maintenance.
 
 ### 2. Source relationships plus a canonical relationship
 
@@ -63,10 +73,15 @@ Each extraction occurrence is independently removable and the canonical `TREATS`
 
 There is also no structural graph path from a chunk to a `TREATS_SOURCE` relationship: relationships cannot be endpoints of other relationships. Document deletion must therefore find source relationships through stored IDs and a relationship-property index, with separate lifecycle logic for every predicate. This is a fundamental reason to prefer a shared Fact-based provenance model.
 
+**Use when:** native source relationships are an explicit application requirement and the number of domain predicates is small.
+
+**What it adds:** independently removable native source relationships, at the cost of a second predicate-specific representation.
+
 ### 3. Canonical Fact nodes plus a native query projection
 
 ```text
-(Chunk)-[:SUPPORTS {confidence, extractorVersion}]->(Fact)
+(Chunk)-[:SUPPORTS {supportId, subjectMentionId, objectMentionId,
+                    confidence, extractorVersion}]->(Fact)
 (Fact)-[:SUBJECT]->(Drug)
 (Fact)-[:OBJECT]->(Indication)
 (Drug)-[:TREATS {factId, supportCount}]->(Indication)
@@ -76,16 +91,26 @@ One `Fact` represents one normalized claim. Many chunks can support it without d
 
 This is the recommended default. `Fact` is the provenance source of truth; `TREATS` is the query projection.
 
+**Use when:** support occurrences follow the lifecycle of their chunks and their metadata does not need independent graph relationships or history.
+
+**What it adds:** deduplicated claim identity, compact occurrence-level provenance, and predicate-independent lifecycle logic.
+
 ### 4. Fact and Evidence nodes plus a native query projection
 
 ```text
 (Chunk)-[:HAS_EVIDENCE]->(Evidence)-[:SUPPORTS]->(Fact)
+(Evidence)-[:SUBJECT_MENTION]->(EntityMention)-[:RESOLVED_TO]->(Entity)
+(Evidence)-[:OBJECT_MENTION]->(EntityMention)-[:RESOLVED_TO]->(Entity)
 (Fact)-[:SUBJECT]->(Drug)
 (Fact)-[:OBJECT]->(Indication)
 (Drug)-[:TREATS {factId, supportCount}]->(Indication)
 ```
 
-An `Evidence` node represents one extraction occurrence and can carry quotations, spans, confidence, model version, review status, and correction history. Use it when an occurrence needs a stable ID or independent lifecycle. Otherwise, metadata on `Chunk-[:SUPPORTS]->Fact` is smaller and simpler.
+An `Evidence` node represents one extraction occurrence. It can carry quotations, spans, confidence, extraction lineage, review state, and correction history, while its relationships bind the exact subject and object mentions used to construct the Fact.
+
+**Use when:** an occurrence must be independently referenced, reviewed, rejected, corrected, superseded, connected to several records, or interpreted against more than one Fact.
+
+**What it adds:** first-class occurrence identity and richer graph structure. If confidence, offsets, quotation, extractor version, and one lightweight status are sufficient, keep them on `SUPPORTS` and use model 3.
 
 ## What belongs on Fact, SUPPORTS, and Evidence
 
@@ -97,18 +122,16 @@ The placement rule is simple:
 
 ### Fact properties
 
-A `Fact` stores the source-independent meaning and identity of a claim. Typical properties include:
+A `Fact` stores the source-independent identity of a normalized claim. The demo deliberately keeps it small:
 
 | Property | Purpose |
 |---|---|
 | `factId` | Deterministic identifier derived from the normalized claim |
 | `predicate` | Normalized predicate such as `TREATS` |
-| `polarity` | Positive, negative, or another normalized assertion state |
-| `modality` | Asserted, possible, hypothetical, conditional, and so on |
-| `qualifiers` | Normalized dose, route, population, time, or experimental context when these participate in claim identity |
-| `normalizationVersion` | Version of the rules or ontology used to construct the canonical claim |
 
-Do not put `chunkId`, quotation, extraction confidence, or extractor version on `Fact`: different sources of the same Fact can have different values. Mutable aggregates such as support count or maximum confidence should normally be treated as derived caches rather than Fact identity.
+Do not put `chunkId`, quotation, extraction confidence, extractor version, or normalization-run metadata on `Fact`: different sources of the same Fact can have different values. Mutable aggregates such as support count or maximum confidence are derived caches rather than Fact identity.
+
+Production Fact identity must include every normalized value that changes claim meaning, such as negation, dose, population, time, or modality. Those values may be stored on the Fact when applications need to query them, but this demo does not add unused `polarity`, `modality`, or `normalizationVersion` properties.
 
 ### SUPPORTS relationship properties
 
@@ -116,7 +139,8 @@ In model 3, each `Chunk-[:SUPPORTS]->Fact` relationship represents one source oc
 
 | Property | Purpose |
 |---|---|
-| `supportId` | Stable ID for idempotent ingestion when the same chunk can be processed more than once |
+| `supportId` | Stable ID for one extraction occurrence, used to make retries idempotent and distinguish repeated claims in one chunk |
+| `subjectMentionId`, `objectMentionId` | Mention occurrences used as the claim endpoints, needed to route support after entity correction or splitting |
 | `confidence` | Extractor confidence for this occurrence—not confidence in the Fact globally |
 | `extractorVersion` | Model or pipeline version that produced the extraction |
 | `extractionRunId` | Identifier of the ingestion or extraction run |
@@ -131,13 +155,13 @@ If one chunk can produce the same Fact in several extraction runs, either give e
 
 ### Evidence node properties
 
-An `Evidence` node promotes a support occurrence into a first-class record. Typical properties include:
+An `Evidence` node promotes a support occurrence into a first-class record. Its properties describe the occurrence, while its relationships can connect it to mentions, Facts, reviews, extraction runs, or other audit records. Typical properties include:
 
 | Property | Purpose |
 |---|---|
 | `evidenceId` | Stable identifier for this extraction occurrence |
 | `quotation` | Exact text supporting the interpretation |
-| `page`, `section`, and character offsets | Precise location inside the source |
+| `page`, `section` | Precise location inside the source document |
 | `confidence` | Confidence assigned by this extraction run |
 | `extractorVersion` and `extractionRunId` | Extraction lineage |
 | `reviewStatus` | Unreviewed, accepted, rejected, corrected, or superseded |
@@ -150,9 +174,11 @@ With explicit Evidence, rich occurrence metadata belongs on the node:
 (Chunk)-[:HAS_EVIDENCE]->(Evidence)-[:SUPPORTS]->(Fact)
 ```
 
+Character offsets and surface forms belong on the subject and object `EntityMention` nodes in this model. `SUBJECT_MENTION` and `OBJECT_MENTION` relationships make their roles in the extraction explicit.
+
 The `Evidence-[:SUPPORTS]->Fact` relationship can remain property-free when an Evidence item supports exactly one Fact. If Evidence can be interpreted differently against several Facts, the relationship may carry only association-specific values such as `stance`, `entailmentScore`, or `mappingVersion`.
 
-For contradictory scientific statements, either use association types such as `SUPPORTS` and `CONTRADICTS`, or store a controlled `stance` value. Keep the canonical claim’s own negation or polarity on `Fact` when it changes the claim identity; do not confuse claim polarity with whether a source supports that claim.
+For contradictory scientific statements, either use association types such as `SUPPORTS` and `CONTRADICTS`, or store a controlled `stance` value. A negative claim is a different canonical Fact when negation changes its meaning; do not confuse claim negation with whether a source supports that claim.
 
 ## Recommendation
 
@@ -186,7 +212,7 @@ RETURN drug.name AS subject, type(r) AS predicate,
        c.text AS excerpt, s.confidence AS confidence;
 ```
 
-The Aura demo includes equivalent citation queries for both the compact `SUPPORTS` model and the explicit `Evidence` model. Running them after document deletion also verifies that the native projection and its provenance remain consistent.
+The saved-query demo includes equivalent citation queries for both the compact `SUPPORTS` model and the explicit `Evidence` model. Running them after document deletion also verifies that the native projection and its provenance remain consistent.
 
 ## Fact identity
 
@@ -199,6 +225,8 @@ DRUG-ASPIRIN|TREATS|IND-MIGRAINE
 Production IDs should be generated from a canonical representation and normally hashed outside Neo4j. Include every field that changes the meaning of a scientific claim, potentially including negation, dose, route, population, temporality, modality, and experimental context. Claims with materially different qualifiers must not collapse into the same `Fact`.
 
 Canonical entity resolution is a separate concern. Removing a document must remove its mentions and support without deleting an entity that is still mentioned or used by another supported fact.
+
+The companion entity-resolution pattern uses explicit `EntityMention` nodes because mentions must survive merge and split decisions. Its compact Fact support uses the same `subjectMentionId` and `objectMentionId` role bindings introduced here. When entity endpoints merge or split, recompute only the affected Fact identities, move their support occurrences, and refresh only the affected native relationships.
 
 ## Update and deletion lifecycle
 
@@ -235,15 +263,19 @@ Relationship-property uniqueness constraints used by the demo are available from
 
 ## Optional extension: contradictory publications
 
-A useful follow-on experiment is a third document stating that aspirin is not effective for migraine. It should create a separate normalized Fact with negative polarity rather than modify the positive Fact. Both Facts can retain their own sources and materialized domain semantics. This extension is intentionally outside the main walkthrough so the provenance and deletion story stays short.
+A useful follow-on experiment is a third document stating that aspirin is not effective for migraine. It should create a separate normalized negative claim rather than modify the original Fact. Both Facts can retain their own sources and materialized domain semantics. This extension is intentionally outside the main walkthrough so the provenance and deletion story stays short.
 
-## Import and run
+## Run this pattern
+
+See the repository [import and run instructions](../README.md#import-and-run) for shared requirements and the database reset warning.
 
 Import `graphrag-provenance-aura-saved-queries.csv` into the saved queries area of the Neo4j Aura console. It creates one top-level folder containing four model folders.
 
 Run one model folder in step order. Each model is self-contained and starts by deleting all data in the current database, so use only a disposable demonstration database.
 
-The saved queries favor visual explanation over bulk-ingestion performance. Graph-display steps return nodes and relationships so the effect of adding, updating, and deleting sources can be inspected directly in Aura.
+The saved queries favor visual explanation over bulk-ingestion performance. Short comments explain important lifecycle boundaries, and graph-display steps return nodes and relationships so the effect of adding, updating, and deleting sources can be inspected directly in Aura.
+
+The complete suite was last run successfully on Neo4j Enterprise 2026.08.0 using the Cypher 25 default language, with no errors or warnings. Each ingestion step was also run twice and preserved the same node and relationship counts.
 
 ## Comparison
 
@@ -252,4 +284,4 @@ The saved queries favor visual explanation over bulk-ingestion performance. Grap
 | Relationship with source array | Yes | Weak | Arrays are difficult to query and update per source |
 | Source + canonical relationships | Yes | Good | Predicate-specific schema and no structural path from chunks to source relationships |
 | Fact + native projection | Yes | Good | Projection consistency must be maintained |
-| Fact + Evidence + native projection | Yes | Richest | Highest storage and operational cost |
+| Fact + Evidence + native projection | Yes | Independent occurrence lifecycle | Highest storage and operational cost |
