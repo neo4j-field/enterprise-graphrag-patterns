@@ -1,0 +1,651 @@
+name,description,query,id,parentId,isFolder
+GraphRAG entity resolution demo,Four identity models show merge post-processing provenance and reversal.,,0,,true
+1 - Physical canonical merge,Delete a duplicate node after moving its mentions and supported Fact into a survivor.,,1,0,true
+Step 1 - Reset and constrain,Delete the demo graph and create stable identifier constraints,"// WARNING: reset only a disposable demo database.
+MATCH (n) DETACH DELETE n;
+
+CREATE CONSTRAINT document_id IF NOT EXISTS
+FOR (d:Document) REQUIRE d.documentId IS UNIQUE;
+CREATE CONSTRAINT chunk_id IF NOT EXISTS
+FOR (c:Chunk) REQUIRE c.chunkId IS UNIQUE;
+CREATE CONSTRAINT entity_id IF NOT EXISTS
+FOR (e:Entity) REQUIRE e.entityId IS UNIQUE;
+CREATE CONSTRAINT fact_id IF NOT EXISTS
+FOR (f:Fact) REQUIRE f.factId IS UNIQUE;
+",2,1,false
+Step 2 - Create duplicate entities,Idempotently create two chunks that initially support two separate Drug identities and Facts.,"// Stable IDs make extraction ingestion safe to retry.
+MERGE (d1:Document {documentId: 'DOC-1'}) SET d1.title = 'Paracetamol study'
+MERGE (d2:Document {documentId: 'DOC-2'}) SET d2.title = 'Acetaminophen study'
+MERGE (c1:Chunk {chunkId: 'DOC-1-C1'}) SET c1.text = 'Paracetamol treats fever.'
+MERGE (c2:Chunk {chunkId: 'DOC-2-C1'}) SET c2.text = 'Acetaminophen treats fever.'
+MERGE (para:Entity:Drug {entityId: 'DRUG-PARACETAMOL'})
+SET para.name = 'Paracetamol', para.standardConceptId = 'DEMO-DRUG-001'
+MERGE (acet:Entity:Drug {entityId: 'DRUG-ACETAMINOPHEN'})
+SET acet.name = 'Acetaminophen', acet.standardConceptId = 'DEMO-DRUG-001'
+MERGE (fever:Entity:Indication {entityId: 'IND-FEVER'}) SET fever.name = 'Fever'
+MERGE (f1:Fact {factId: 'DRUG-PARACETAMOL|TREATS|IND-FEVER'})
+SET f1.predicate = 'TREATS', f1.polarity = 'POSITIVE'
+MERGE (f2:Fact {factId: 'DRUG-ACETAMINOPHEN|TREATS|IND-FEVER'})
+SET f2.predicate = 'TREATS', f2.polarity = 'POSITIVE'
+MERGE (c1)-[:PART_OF]->(d1)
+MERGE (c2)-[:PART_OF]->(d2)
+MERGE (c1)-[mp:MENTIONS {mentionId: 'M-PARA'}]->(para)
+SET mp.surfaceForm = 'Paracetamol', mp.start = 0, mp.end = 11,
+    mp.confidence = 0.96, mp.extractorVersion = 'demo-v1'
+MERGE (c1)-[mf1:MENTIONS {mentionId: 'M-FEVER-1'}]->(fever)
+SET mf1.surfaceForm = 'fever', mf1.start = 19, mf1.end = 24,
+    mf1.confidence = 0.97, mf1.extractorVersion = 'demo-v1'
+MERGE (c2)-[ma:MENTIONS {mentionId: 'M-ACET'}]->(acet)
+SET ma.surfaceForm = 'Acetaminophen', ma.start = 0, ma.end = 13,
+    ma.confidence = 0.98, ma.extractorVersion = 'demo-v1'
+MERGE (c2)-[mf2:MENTIONS {mentionId: 'M-FEVER-2'}]->(fever)
+SET mf2.surfaceForm = 'fever', mf2.start = 21, mf2.end = 26,
+    mf2.confidence = 0.97, mf2.extractorVersion = 'demo-v1'
+MERGE (f1)-[:SUBJECT]->(para)
+MERGE (f1)-[:OBJECT]->(fever)
+MERGE (f2)-[:SUBJECT]->(acet)
+MERGE (f2)-[:OBJECT]->(fever)
+MERGE (c1)-[s1:SUPPORTS {supportId: 'SUPPORT-1'}]->(f1)
+SET s1.subjectMentionId = 'M-PARA', s1.objectMentionId = 'M-FEVER-1',
+    s1.confidence = 0.94, s1.extractorVersion = 'demo-v1'
+MERGE (c2)-[s2:SUPPORTS {supportId: 'SUPPORT-2'}]->(f2)
+SET s2.subjectMentionId = 'M-ACET', s2.objectMentionId = 'M-FEVER-2',
+    s2.confidence = 0.95, s2.extractorVersion = 'demo-v1'
+MERGE (para)-[r1:TREATS {factId: f1.factId}]->(fever) SET r1.supportCount = 1
+MERGE (acet)-[r2:TREATS {factId: f2.factId}]->(fever) SET r2.supportCount = 1;
+",3,1,false
+Step 3 - Display before resolution,Show the two Drug entities their source graph and their duplicate query relationships.,"MATCH (n)
+OPTIONAL MATCH (n)-[r]->(m)
+RETURN n, r, m;
+",4,1,false
+Step 4 - Inspect the candidate,Find two Drug nodes sharing a supplied trusted concept identifier.,"// Candidate generation must be bounded in production.
+MATCH (left:Drug), (right:Drug)
+WHERE elementId(left) < elementId(right)
+  AND left.standardConceptId = right.standardConceptId
+RETURN left.entityId AS leftId, left.name AS leftName,
+       right.entityId AS rightId, right.name AS rightName,
+       left.standardConceptId AS matchingSignal;
+",5,1,false
+Step 5 - Apply the physical merge,Move source links and Fact support into Acetaminophen then delete the duplicate node.,"// Preserve occurrence metadata while moving direct mention relationships.
+MATCH (loser:Entity {entityId: 'DRUG-PARACETAMOL'}),
+      (winner:Entity {entityId: 'DRUG-ACETAMINOPHEN'})
+MATCH (c:Chunk)-[old:MENTIONS]->(loser)
+WITH c, winner, old, properties(old) AS occurrence
+DELETE old
+MERGE (c)-[m:MENTIONS {mentionId: occurrence.mentionId}]->(winner)
+SET m = occurrence;
+
+// The two claims now have the same canonical identity: move source support.
+MATCH (oldFact:Fact {factId: 'DRUG-PARACETAMOL|TREATS|IND-FEVER'}),
+      (canonicalFact:Fact {factId: 'DRUG-ACETAMINOPHEN|TREATS|IND-FEVER'})
+MATCH (c:Chunk)-[old:SUPPORTS]->(oldFact)
+WITH c, oldFact, canonicalFact, old, properties(old) AS support
+DELETE old
+MERGE (c)-[s:SUPPORTS {supportId: support.supportId}]->(canonicalFact)
+SET s = support;
+
+MATCH (oldFact:Fact {factId: 'DRUG-PARACETAMOL|TREATS|IND-FEVER'})
+DETACH DELETE oldFact;
+
+// Keep an alias on the survivor but discard the duplicate identity.
+MATCH (loser:Entity {entityId: 'DRUG-PARACETAMOL'}),
+      (winner:Entity {entityId: 'DRUG-ACETAMINOPHEN'})
+SET winner.aliases = ['Paracetamol'], winner.resolutionStatus = 'CANONICAL'
+DETACH DELETE loser;
+
+// Refresh only the affected native query projection.
+MATCH (f:Fact {factId: 'DRUG-ACETAMINOPHEN|TREATS|IND-FEVER'})-[:SUBJECT]->(drug:Drug),
+      (f)-[:OBJECT]->(indication:Indication)
+MERGE (drug)-[r:TREATS {factId: f.factId}]->(indication)
+WITH f, r
+MATCH (:Chunk)-[s:SUPPORTS]->(f)
+WITH r, count(s) AS supportCount
+SET r.supportCount = supportCount;
+",6,1,false
+Step 6 - Display the merged graph,Show one canonical Drug one Fact and one native relationship with two supports.,"MATCH (n)
+OPTIONAL MATCH (n)-[r]->(m)
+RETURN n, r, m;
+",7,1,false
+Step 7 - Query and cite,Use the native graph then trace its canonical Fact to both source chunks.,"MATCH (drug:Drug)-[r:TREATS]->(indication:Indication)
+MATCH (f:Fact {factId: r.factId})<-[s:SUPPORTS]-(c:Chunk)-[:PART_OF]->(d:Document)
+MATCH (c)-[mention:MENTIONS]->(drug)
+RETURN drug.name AS subject, type(r) AS predicate, indication.name AS object,
+       d.documentId AS documentId, c.text AS excerpt,
+       mention.surfaceForm AS extractedName, s.confidence AS factConfidence
+ORDER BY documentId;
+",8,1,false
+Step 8 - Inspect reversibility,Confirm that the losing canonical node and its original Fact no longer exist.,"// Surface forms remain but the former identity and merge rationale are gone.
+OPTIONAL MATCH (loser:Entity {entityId: 'DRUG-PARACETAMOL'})
+OPTIONAL MATCH (oldFact:Fact {factId: 'DRUG-PARACETAMOL|TREATS|IND-FEVER'})
+RETURN count(loser) AS recoverableEntityCount,
+       count(oldFact) AS recoverableFactCount,
+       'A reliable split requires external history or reconstruction' AS conclusion;
+",9,1,false
+2 - Mentions to canonical entities,Retain extraction occurrences and change only their current canonical resolution.,,10,0,true
+Step 1 - Reset and constrain,Delete the demo graph and constrain document mention entity and Fact IDs.,"// WARNING: reset only a disposable demo database.
+MATCH (n) DETACH DELETE n;
+
+CREATE CONSTRAINT document_id IF NOT EXISTS
+FOR (d:Document) REQUIRE d.documentId IS UNIQUE;
+CREATE CONSTRAINT chunk_id IF NOT EXISTS
+FOR (c:Chunk) REQUIRE c.chunkId IS UNIQUE;
+CREATE CONSTRAINT mention_id IF NOT EXISTS
+FOR (m:EntityMention) REQUIRE m.mentionId IS UNIQUE;
+CREATE CONSTRAINT entity_id IF NOT EXISTS
+FOR (e:Entity) REQUIRE e.entityId IS UNIQUE;
+CREATE CONSTRAINT fact_id IF NOT EXISTS
+FOR (f:Fact) REQUIRE f.factId IS UNIQUE;
+",11,10,false
+Step 2 - Create mentions and duplicate entities,Idempotently keep each extraction occurrence separate from its initially resolved canonical Entity.,"// Mentions preserve source truth; RESOLVED_TO is current identity state.
+MERGE (d1:Document {documentId: 'DOC-1'}) SET d1.title = 'Paracetamol study'
+MERGE (d2:Document {documentId: 'DOC-2'}) SET d2.title = 'Acetaminophen study'
+MERGE (c1:Chunk {chunkId: 'DOC-1-C1'}) SET c1.text = 'Paracetamol treats fever.'
+MERGE (c2:Chunk {chunkId: 'DOC-2-C1'}) SET c2.text = 'Acetaminophen treats fever.'
+MERGE (m1:EntityMention {mentionId: 'M-PARA'})
+SET m1.surfaceForm = 'Paracetamol', m1.proposedType = 'Drug', m1.start = 0,
+    m1.end = 11, m1.confidence = 0.96, m1.extractorVersion = 'demo-v1'
+MERGE (m2:EntityMention {mentionId: 'M-ACET'})
+SET m2.surfaceForm = 'Acetaminophen', m2.proposedType = 'Drug', m2.start = 0,
+    m2.end = 13, m2.confidence = 0.98, m2.extractorVersion = 'demo-v1'
+MERGE (mf1:EntityMention {mentionId: 'M-FEVER-1'})
+SET mf1.surfaceForm = 'fever', mf1.proposedType = 'Indication', mf1.start = 19, mf1.end = 24
+MERGE (mf2:EntityMention {mentionId: 'M-FEVER-2'})
+SET mf2.surfaceForm = 'fever', mf2.proposedType = 'Indication', mf2.start = 21, mf2.end = 26
+MERGE (para:Entity:Drug {entityId: 'DRUG-PARACETAMOL'})
+SET para.name = 'Paracetamol', para.standardConceptId = 'DEMO-DRUG-001'
+MERGE (acet:Entity:Drug {entityId: 'DRUG-ACETAMINOPHEN'})
+SET acet.name = 'Acetaminophen', acet.standardConceptId = 'DEMO-DRUG-001'
+MERGE (fever:Entity:Indication {entityId: 'IND-FEVER'}) SET fever.name = 'Fever'
+MERGE (f1:Fact {factId: 'DRUG-PARACETAMOL|TREATS|IND-FEVER'})
+SET f1.predicate = 'TREATS', f1.polarity = 'POSITIVE'
+MERGE (f2:Fact {factId: 'DRUG-ACETAMINOPHEN|TREATS|IND-FEVER'})
+SET f2.predicate = 'TREATS', f2.polarity = 'POSITIVE'
+MERGE (c1)-[:PART_OF]->(d1)
+MERGE (c2)-[:PART_OF]->(d2)
+MERGE (c1)-[:HAS_MENTION]->(m1)
+MERGE (c1)-[:HAS_MENTION]->(mf1)
+MERGE (c2)-[:HAS_MENTION]->(m2)
+MERGE (c2)-[:HAS_MENTION]->(mf2)
+MERGE (m1)-[rm1:RESOLVED_TO]->(para) SET rm1.method = 'initial-extraction'
+MERGE (m2)-[rm2:RESOLVED_TO]->(acet) SET rm2.method = 'initial-extraction'
+MERGE (mf1)-[rf1:RESOLVED_TO]->(fever) SET rf1.method = 'exact-name'
+MERGE (mf2)-[rf2:RESOLVED_TO]->(fever) SET rf2.method = 'exact-name'
+MERGE (m1)-[candidate:CANDIDATE_FOR]->(acet)
+SET candidate.score = 0.99, candidate.method = 'trusted-identifier', candidate.status = 'PROPOSED'
+MERGE (f1)-[:SUBJECT]->(para)
+MERGE (f1)-[:OBJECT]->(fever)
+MERGE (f2)-[:SUBJECT]->(acet)
+MERGE (f2)-[:OBJECT]->(fever)
+MERGE (c1)-[s1:SUPPORTS {supportId: 'SUPPORT-1'}]->(f1)
+SET s1.subjectMentionId = 'M-PARA', s1.objectMentionId = 'M-FEVER-1', s1.confidence = 0.94
+MERGE (c2)-[s2:SUPPORTS {supportId: 'SUPPORT-2'}]->(f2)
+SET s2.subjectMentionId = 'M-ACET', s2.objectMentionId = 'M-FEVER-2', s2.confidence = 0.95
+MERGE (para)-[r1:TREATS {factId: f1.factId}]->(fever) SET r1.supportCount = 1
+MERGE (acet)-[r2:TREATS {factId: f2.factId}]->(fever) SET r2.supportCount = 1;
+",12,10,false
+Step 3 - Display before resolution,Show immutable mentions current resolutions candidate evidence Facts and query relationships.,"MATCH (n)
+OPTIONAL MATCH (n)-[r]->(m)
+RETURN n, r, m;
+",13,10,false
+Step 4 - Accept and materialize the merge,Resolve the Paracetamol mention to the survivor and consolidate the affected Fact projection.,"// Replace current resolution without changing the extracted mention.
+MATCH (m:EntityMention {mentionId: 'M-PARA'})-[old:RESOLVED_TO]->(:Entity {entityId: 'DRUG-PARACETAMOL'}),
+      (winner:Entity {entityId: 'DRUG-ACETAMINOPHEN'})
+DELETE old
+MERGE (m)-[resolved:RESOLVED_TO]->(winner)
+SET resolved.method = 'trusted-identifier', resolved.resolverVersion = 'demo-resolver-v1'
+WITH m, winner
+MATCH (m)-[candidate:CANDIDATE_FOR]->(winner)
+SET candidate.status = 'ACCEPTED';
+
+// Retain the old canonical ID as a redirect for correction and old links.
+MATCH (loser:Entity {entityId: 'DRUG-PARACETAMOL'}),
+      (winner:Entity {entityId: 'DRUG-ACETAMINOPHEN'})
+SET loser.resolutionStatus = 'MERGED', winner.aliases = ['Paracetamol']
+MERGE (loser)-[:MERGED_INTO {method: 'trusted-identifier'}]->(winner);
+
+// Canonical endpoints collide, so consolidate the supported Facts.
+MATCH (oldFact:Fact {factId: 'DRUG-PARACETAMOL|TREATS|IND-FEVER'}),
+      (canonicalFact:Fact {factId: 'DRUG-ACETAMINOPHEN|TREATS|IND-FEVER'})
+MATCH (c:Chunk)-[old:SUPPORTS]->(oldFact)
+WITH c, oldFact, canonicalFact, old, properties(old) AS support
+DELETE old
+MERGE (c)-[s:SUPPORTS {supportId: support.supportId}]->(canonicalFact)
+SET s = support;
+
+MATCH (oldFact:Fact {factId: 'DRUG-PARACETAMOL|TREATS|IND-FEVER'})
+DETACH DELETE oldFact;
+
+MATCH (:Entity {entityId: 'DRUG-PARACETAMOL'})-[old:TREATS]->()
+DELETE old;
+
+MATCH (f:Fact {factId: 'DRUG-ACETAMINOPHEN|TREATS|IND-FEVER'})-[:SUBJECT]->(drug:Drug),
+      (f)-[:OBJECT]->(indication:Indication)
+MERGE (drug)-[r:TREATS {factId: f.factId}]->(indication)
+WITH f, r
+MATCH (:Chunk)-[s:SUPPORTS]->(f)
+WITH r, count(s) AS supportCount
+SET r.supportCount = supportCount;
+",14,10,false
+Step 5 - Display the merged graph,Show that both source mentions now resolve to one canonical Drug.,"MATCH (n)
+OPTIONAL MATCH (n)-[r]->(m)
+RETURN n, r, m;
+",15,10,false
+Step 6 - Query and cite,Return one native relationship with both source surface forms and documents.,"MATCH (drug:Drug)-[r:TREATS]->(indication:Indication)
+MATCH (f:Fact {factId: r.factId})<-[s:SUPPORTS]-(c:Chunk)-[:PART_OF]->(d:Document)
+MATCH (c)-[:HAS_MENTION]->(mention:EntityMention)-[:RESOLVED_TO]->(drug)
+WHERE mention.proposedType = 'Drug'
+RETURN drug.name AS subject, type(r) AS predicate, indication.name AS object,
+       d.documentId AS documentId, c.text AS excerpt,
+       mention.surfaceForm AS extractedName, s.confidence AS factConfidence
+ORDER BY documentId;
+",16,10,false
+Step 7 - Split the identities,Restore the original current resolution and separate the affected Fact support.,"// The mention tells us which observation belongs to the restored entity.
+MATCH (m:EntityMention {mentionId: 'M-PARA'})-[old:RESOLVED_TO]->(:Entity {entityId: 'DRUG-ACETAMINOPHEN'}),
+      (para:Entity {entityId: 'DRUG-PARACETAMOL'})
+DELETE old
+MERGE (m)-[resolved:RESOLVED_TO]->(para)
+SET resolved.method = 'manual-correction', resolved.resolverVersion = 'demo-resolver-v2'
+WITH m, para
+MATCH (m)-[candidate:CANDIDATE_FOR]->(:Entity {entityId: 'DRUG-ACETAMINOPHEN'})
+SET candidate.status = 'REJECTED';
+
+MATCH (para:Entity {entityId: 'DRUG-PARACETAMOL'})-[redirect:MERGED_INTO]->(:Entity {entityId: 'DRUG-ACETAMINOPHEN'})
+DELETE redirect
+SET para.resolutionStatus = 'CANONICAL'
+REMOVE para.mergedAt;
+
+MATCH (acet:Entity {entityId: 'DRUG-ACETAMINOPHEN'}),
+      (fever:Entity {entityId: 'IND-FEVER'})
+SET acet.aliases = []
+MERGE (para:Entity:Drug {entityId: 'DRUG-PARACETAMOL'})
+  ON MATCH SET para.name = 'Paracetamol'
+MERGE (f1:Fact {factId: 'DRUG-PARACETAMOL|TREATS|IND-FEVER'})
+SET f1.predicate = 'TREATS', f1.polarity = 'POSITIVE'
+MERGE (f1)-[:SUBJECT]->(para)
+MERGE (f1)-[:OBJECT]->(fever)
+WITH f1, acet
+MATCH (c:Chunk)-[old:SUPPORTS]->(f2:Fact {factId: 'DRUG-ACETAMINOPHEN|TREATS|IND-FEVER'})
+WHERE old.subjectMentionId = 'M-PARA'
+WITH c, f1, f2, acet, old, properties(old) AS support
+DELETE old
+MERGE (c)-[s:SUPPORTS {supportId: support.supportId}]->(f1)
+SET s = support;
+
+MATCH (para:Entity {entityId: 'DRUG-PARACETAMOL'}),
+      (acet:Entity {entityId: 'DRUG-ACETAMINOPHEN'}),
+      (fever:Entity {entityId: 'IND-FEVER'}),
+      (f1:Fact {factId: 'DRUG-PARACETAMOL|TREATS|IND-FEVER'}),
+      (f2:Fact {factId: 'DRUG-ACETAMINOPHEN|TREATS|IND-FEVER'})
+MERGE (para)-[r1:TREATS {factId: f1.factId}]->(fever)
+MERGE (acet)-[r2:TREATS {factId: f2.factId}]->(fever)
+SET r1.supportCount = 1, r2.supportCount = 1;
+",17,10,false
+Step 8 - Display the corrected split,Show two canonical Drugs again while all original mention data remains intact.,"MATCH (n)
+OPTIONAL MATCH (n)-[r]->(m)
+RETURN n, r, m;
+",18,10,false
+3 - Identity clusters,Resolve document mentions and structured source records into a stable cross-system identity container.,,20,0,true
+Step 1 - Reset and constrain,Delete the demo graph and constrain source record cluster mention entity and Fact IDs.,"// WARNING: reset only a disposable demo database.
+MATCH (n) DETACH DELETE n;
+
+CREATE CONSTRAINT document_id IF NOT EXISTS
+FOR (d:Document) REQUIRE d.documentId IS UNIQUE;
+CREATE CONSTRAINT chunk_id IF NOT EXISTS
+FOR (c:Chunk) REQUIRE c.chunkId IS UNIQUE;
+CREATE CONSTRAINT mention_id IF NOT EXISTS
+FOR (m:EntityMention) REQUIRE m.mentionId IS UNIQUE;
+CREATE CONSTRAINT source_record_id IF NOT EXISTS
+FOR (r:SourceRecord) REQUIRE r.recordId IS UNIQUE;
+CREATE CONSTRAINT cluster_id IF NOT EXISTS
+FOR (c:IdentityCluster) REQUIRE c.clusterId IS UNIQUE;
+CREATE CONSTRAINT entity_id IF NOT EXISTS
+FOR (e:Entity) REQUIRE e.entityId IS UNIQUE;
+CREATE CONSTRAINT fact_id IF NOT EXISTS
+FOR (f:Fact) REQUIRE f.factId IS UNIQUE;
+",21,20,false
+Step 2 - Create two identity clusters,Idempotently place structured records and document mentions in two initially separate identity clusters.,"// Source records keep their source-system identity and values.
+MERGE (terminology:SourceRecord:DrugRecord {recordId: 'TERM-ACET'})
+SET terminology.sourceSystem = 'Terminology', terminology.sourceId = 'T-100',
+    terminology.name = 'Acetaminophen', terminology.standardConceptId = 'DEMO-DRUG-001', terminology.trustRank = 1
+MERGE (regulatory:SourceRecord:DrugRecord {recordId: 'REG-PARA'})
+SET regulatory.sourceSystem = 'RegulatoryCatalog', regulatory.sourceId = 'R-900',
+    regulatory.name = 'Paracetamol', regulatory.standardConceptId = 'DEMO-DRUG-001', regulatory.trustRank = 2
+MERGE (clusterA:IdentityCluster {clusterId: 'CLUSTER-ACET'}) SET clusterA.status = 'ACTIVE'
+MERGE (clusterP:IdentityCluster {clusterId: 'CLUSTER-PARA'}) SET clusterP.status = 'ACTIVE'
+MERGE (acet:Entity:Drug {entityId: 'DRUG-ACETAMINOPHEN'})
+SET acet.name = 'Acetaminophen', acet.canonicalNameSourceRecordId = 'TERM-ACET'
+MERGE (para:Entity:Drug {entityId: 'DRUG-PARACETAMOL'})
+SET para.name = 'Paracetamol', para.canonicalNameSourceRecordId = 'REG-PARA'
+MERGE (fever:Entity:Indication {entityId: 'IND-FEVER'}) SET fever.name = 'Fever'
+MERGE (d1:Document {documentId: 'DOC-1'}) SET d1.title = 'Paracetamol study'
+MERGE (d2:Document {documentId: 'DOC-2'}) SET d2.title = 'Acetaminophen study'
+MERGE (c1:Chunk {chunkId: 'DOC-1-C1'}) SET c1.text = 'Paracetamol treats fever.'
+MERGE (c2:Chunk {chunkId: 'DOC-2-C1'}) SET c2.text = 'Acetaminophen treats fever.'
+MERGE (m1:EntityMention {mentionId: 'M-PARA'})
+SET m1.surfaceForm = 'Paracetamol', m1.proposedType = 'Drug', m1.start = 0, m1.end = 11
+MERGE (m2:EntityMention {mentionId: 'M-ACET'})
+SET m2.surfaceForm = 'Acetaminophen', m2.proposedType = 'Drug', m2.start = 0, m2.end = 13
+MERGE (mf1:EntityMention {mentionId: 'M-FEVER-1'})
+SET mf1.surfaceForm = 'fever', mf1.proposedType = 'Indication', mf1.start = 19, mf1.end = 24
+MERGE (mf2:EntityMention {mentionId: 'M-FEVER-2'})
+SET mf2.surfaceForm = 'fever', mf2.proposedType = 'Indication', mf2.start = 21, mf2.end = 26
+MERGE (f1:Fact {factId: 'DRUG-PARACETAMOL|TREATS|IND-FEVER'})
+SET f1.predicate = 'TREATS', f1.polarity = 'POSITIVE'
+MERGE (f2:Fact {factId: 'DRUG-ACETAMINOPHEN|TREATS|IND-FEVER'})
+SET f2.predicate = 'TREATS', f2.polarity = 'POSITIVE'
+MERGE (terminology)-[mt:MEMBER_OF]->(clusterA) SET mt.method = 'source-import'
+MERGE (regulatory)-[mr:MEMBER_OF]->(clusterP) SET mr.method = 'source-import'
+MERGE (m1)-[mm1:MEMBER_OF]->(clusterP) SET mm1.method = 'initial-name-match'
+MERGE (m2)-[mm2:MEMBER_OF]->(clusterA) SET mm2.method = 'initial-name-match'
+MERGE (clusterA)-[:MATERIALIZES]->(acet)
+MERGE (clusterP)-[:MATERIALIZES]->(para)
+MERGE (c1)-[:PART_OF]->(d1)
+MERGE (c2)-[:PART_OF]->(d2)
+MERGE (c1)-[:HAS_MENTION]->(m1)
+MERGE (c1)-[:HAS_MENTION]->(mf1)
+MERGE (c2)-[:HAS_MENTION]->(m2)
+MERGE (c2)-[:HAS_MENTION]->(mf2)
+MERGE (mf1)-[rf1:RESOLVED_TO]->(fever) SET rf1.method = 'exact-name'
+MERGE (mf2)-[rf2:RESOLVED_TO]->(fever) SET rf2.method = 'exact-name'
+MERGE (f1)-[:SUBJECT]->(para)
+MERGE (f1)-[:OBJECT]->(fever)
+MERGE (f2)-[:SUBJECT]->(acet)
+MERGE (f2)-[:OBJECT]->(fever)
+MERGE (c1)-[s1:SUPPORTS {supportId: 'SUPPORT-1'}]->(f1)
+SET s1.subjectMentionId = 'M-PARA', s1.objectMentionId = 'M-FEVER-1', s1.confidence = 0.94
+MERGE (c2)-[s2:SUPPORTS {supportId: 'SUPPORT-2'}]->(f2)
+SET s2.subjectMentionId = 'M-ACET', s2.objectMentionId = 'M-FEVER-2', s2.confidence = 0.95
+MERGE (para)-[r1:TREATS {factId: f1.factId}]->(fever) SET r1.supportCount = 1
+MERGE (acet)-[r2:TREATS {factId: f2.factId}]->(fever) SET r2.supportCount = 1;
+",22,20,false
+Step 3 - Display before cluster merge,Show the independently addressable records mentions clusters and materialized entities.,"MATCH (n)
+OPTIONAL MATCH (n)-[r]->(m)
+RETURN n, r, m;
+",23,20,false
+Step 4 - Find cross-system candidates,Use a shared structured identifier to find records assigned to different clusters.,"// A real pipeline blocks candidates by type tenant and other constraints.
+MATCH (left:SourceRecord)-[:MEMBER_OF]->(leftCluster:IdentityCluster),
+      (right:SourceRecord)-[:MEMBER_OF]->(rightCluster:IdentityCluster)
+WHERE elementId(left) < elementId(right)
+  AND left.standardConceptId = right.standardConceptId
+  AND leftCluster <> rightCluster
+RETURN left.sourceSystem AS leftSystem, left.name AS leftName,
+       right.sourceSystem AS rightSystem, right.name AS rightName,
+       left.standardConceptId AS matchingSignal,
+       leftCluster.clusterId AS leftCluster, rightCluster.clusterId AS rightCluster;
+",24,20,false
+Step 5 - Merge the identity clusters,Move source membership into one cluster and rebuild its canonical Fact projection.,"// Move members but retain the old cluster as a stable redirect.
+MATCH (oldCluster:IdentityCluster {clusterId: 'CLUSTER-PARA'}),
+      (winner:IdentityCluster {clusterId: 'CLUSTER-ACET'})
+MATCH (member)-[old:MEMBER_OF]->(oldCluster)
+WITH member, oldCluster, winner, old, properties(old) AS membership
+DELETE old
+MERGE (member)-[m:MEMBER_OF]->(winner)
+SET m = membership;
+
+MATCH (oldCluster:IdentityCluster {clusterId: 'CLUSTER-PARA'}),
+      (winner:IdentityCluster {clusterId: 'CLUSTER-ACET'}),
+      (loser:Entity {entityId: 'DRUG-PARACETAMOL'}),
+      (survivor:Entity {entityId: 'DRUG-ACETAMINOPHEN'})
+MATCH (oldCluster)-[projection:MATERIALIZES]->(loser)
+DELETE projection
+SET oldCluster.status = 'MERGED', loser.resolutionStatus = 'MERGED',
+    survivor.aliases = ['Paracetamol'],
+    survivor.canonicalNameSourceRecordId = 'TERM-ACET'
+MERGE (oldCluster)-[:MERGED_INTO]->(winner)
+MERGE (loser)-[:MERGED_INTO]->(survivor);
+
+// Resolution changed a Fact endpoint: consolidate its support.
+MATCH (oldFact:Fact {factId: 'DRUG-PARACETAMOL|TREATS|IND-FEVER'}),
+      (canonicalFact:Fact {factId: 'DRUG-ACETAMINOPHEN|TREATS|IND-FEVER'})
+MATCH (c:Chunk)-[old:SUPPORTS]->(oldFact)
+WITH c, oldFact, canonicalFact, old, properties(old) AS support
+DELETE old
+MERGE (c)-[s:SUPPORTS {supportId: support.supportId}]->(canonicalFact)
+SET s = support;
+
+MATCH (oldFact:Fact {factId: 'DRUG-PARACETAMOL|TREATS|IND-FEVER'})
+DETACH DELETE oldFact;
+
+MATCH (:Entity {entityId: 'DRUG-PARACETAMOL'})-[old:TREATS]->()
+DELETE old;
+
+MATCH (f:Fact {factId: 'DRUG-ACETAMINOPHEN|TREATS|IND-FEVER'})-[:SUBJECT]->(drug:Drug),
+      (f)-[:OBJECT]->(indication:Indication)
+MERGE (drug)-[r:TREATS {factId: f.factId}]->(indication)
+WITH f, r
+MATCH (:Chunk)-[s:SUPPORTS]->(f)
+WITH r, count(s) AS supportCount
+SET r.supportCount = supportCount;
+",25,20,false
+Step 6 - Display the merged cluster,Show two records and two mentions grouped by one cluster that materializes one canonical Drug.,"MATCH (n)
+OPTIONAL MATCH (n)-[r]->(m)
+RETURN n, r, m;
+",26,20,false
+Step 7 - Query and cite through the cluster,Return the canonical query edge with each mention source record and supporting document.,"MATCH (cluster:IdentityCluster {clusterId: 'CLUSTER-ACET'})-[:MATERIALIZES]->(drug:Drug)-[r:TREATS]->(indication:Indication)
+MATCH (f:Fact {factId: r.factId})<-[s:SUPPORTS]-(c:Chunk)-[:PART_OF]->(d:Document)
+MATCH (c)-[:HAS_MENTION]->(mention:EntityMention)-[:MEMBER_OF]->(cluster)
+OPTIONAL MATCH (record:SourceRecord)-[:MEMBER_OF]->(cluster)
+RETURN drug.name AS subject, type(r) AS predicate, indication.name AS object,
+       d.documentId AS documentId, mention.surfaceForm AS extractedName,
+       collect(DISTINCT record.sourceSystem + ':' + record.sourceId) AS structuredRecords,
+       s.confidence AS factConfidence
+ORDER BY documentId;
+",27,20,false
+Step 8 - Split the cluster,Move the Paracetamol record and mention back to their retained cluster and rebuild affected Facts.,"// Explicit memberships identify exactly which records return to the split cluster.
+MATCH (winner:IdentityCluster {clusterId: 'CLUSTER-ACET'}),
+      (restored:IdentityCluster {clusterId: 'CLUSTER-PARA'})
+MATCH (member)-[old:MEMBER_OF]->(winner)
+WHERE member.recordId = 'REG-PARA' OR member.mentionId = 'M-PARA'
+WITH member, winner, restored, old, properties(old) AS membership
+DELETE old
+MERGE (member)-[m:MEMBER_OF]->(restored)
+SET m = membership;
+
+MATCH (restored:IdentityCluster {clusterId: 'CLUSTER-PARA'})-[clusterRedirect:MERGED_INTO]->(:IdentityCluster {clusterId: 'CLUSTER-ACET'}),
+      (loser:Entity {entityId: 'DRUG-PARACETAMOL'})-[entityRedirect:MERGED_INTO]->(survivor:Entity {entityId: 'DRUG-ACETAMINOPHEN'})
+DELETE clusterRedirect, entityRedirect
+SET restored.status = 'ACTIVE', loser.resolutionStatus = 'CANONICAL', survivor.aliases = []
+MERGE (restored)-[:MATERIALIZES]->(loser);
+
+MATCH (para:Entity {entityId: 'DRUG-PARACETAMOL'}),
+      (fever:Entity {entityId: 'IND-FEVER'})
+MERGE (f1:Fact {factId: 'DRUG-PARACETAMOL|TREATS|IND-FEVER'})
+SET f1.predicate = 'TREATS', f1.polarity = 'POSITIVE'
+MERGE (f1)-[:SUBJECT]->(para)
+MERGE (f1)-[:OBJECT]->(fever)
+WITH f1
+MATCH (c:Chunk)-[old:SUPPORTS]->(:Fact {factId: 'DRUG-ACETAMINOPHEN|TREATS|IND-FEVER'})
+WHERE old.subjectMentionId = 'M-PARA'
+WITH c, f1, old, properties(old) AS support
+DELETE old
+MERGE (c)-[s:SUPPORTS {supportId: support.supportId}]->(f1)
+SET s = support;
+
+MATCH (para:Entity {entityId: 'DRUG-PARACETAMOL'}),
+      (acet:Entity {entityId: 'DRUG-ACETAMINOPHEN'}),
+      (fever:Entity {entityId: 'IND-FEVER'}),
+      (f1:Fact {factId: 'DRUG-PARACETAMOL|TREATS|IND-FEVER'}),
+      (f2:Fact {factId: 'DRUG-ACETAMINOPHEN|TREATS|IND-FEVER'})
+MERGE (para)-[r1:TREATS {factId: f1.factId}]->(fever)
+MERGE (acet)-[r2:TREATS {factId: f2.factId}]->(fever)
+SET r1.supportCount = 1, r2.supportCount = 1;
+",28,20,false
+Step 9 - Display the restored clusters,Show the split while preserving every original structured record and document mention.,"MATCH (n)
+OPTIONAL MATCH (n)-[r]->(m)
+RETURN n, r, m;
+",29,20,false
+4 - Audited resolution decisions,Keep durable merge rationale and supersession while materializing a fast current state.,,30,0,true
+Step 1 - Reset and constrain,Delete the demo graph and constrain source mention entity Fact and decision IDs.,"// WARNING: reset only a disposable demo database.
+MATCH (n) DETACH DELETE n;
+
+CREATE CONSTRAINT document_id IF NOT EXISTS
+FOR (d:Document) REQUIRE d.documentId IS UNIQUE;
+CREATE CONSTRAINT chunk_id IF NOT EXISTS
+FOR (c:Chunk) REQUIRE c.chunkId IS UNIQUE;
+CREATE CONSTRAINT mention_id IF NOT EXISTS
+FOR (m:EntityMention) REQUIRE m.mentionId IS UNIQUE;
+CREATE CONSTRAINT entity_id IF NOT EXISTS
+FOR (e:Entity) REQUIRE e.entityId IS UNIQUE;
+CREATE CONSTRAINT fact_id IF NOT EXISTS
+FOR (f:Fact) REQUIRE f.factId IS UNIQUE;
+CREATE CONSTRAINT decision_id IF NOT EXISTS
+FOR (d:ResolutionDecision) REQUIRE d.decisionId IS UNIQUE;
+",31,30,false
+Step 2 - Create a proposed decision,Idempotently create two identities their source graph and an unresolved audited merge proposal.,"// The decision records rationale; current state remains separately materialized.
+MERGE (d1:Document {documentId: 'DOC-1'}) SET d1.title = 'Paracetamol study'
+MERGE (d2:Document {documentId: 'DOC-2'}) SET d2.title = 'Acetaminophen study'
+MERGE (c1:Chunk {chunkId: 'DOC-1-C1'}) SET c1.text = 'Paracetamol treats fever.'
+MERGE (c2:Chunk {chunkId: 'DOC-2-C1'}) SET c2.text = 'Acetaminophen treats fever.'
+MERGE (m1:EntityMention {mentionId: 'M-PARA'})
+SET m1.surfaceForm = 'Paracetamol', m1.proposedType = 'Drug', m1.start = 0, m1.end = 11
+MERGE (m2:EntityMention {mentionId: 'M-ACET'})
+SET m2.surfaceForm = 'Acetaminophen', m2.proposedType = 'Drug', m2.start = 0, m2.end = 13
+MERGE (mf1:EntityMention {mentionId: 'M-FEVER-1'})
+SET mf1.surfaceForm = 'fever', mf1.proposedType = 'Indication', mf1.start = 19, mf1.end = 24
+MERGE (mf2:EntityMention {mentionId: 'M-FEVER-2'})
+SET mf2.surfaceForm = 'fever', mf2.proposedType = 'Indication', mf2.start = 21, mf2.end = 26
+MERGE (para:Entity:Drug {entityId: 'DRUG-PARACETAMOL'}) SET para.name = 'Paracetamol'
+MERGE (acet:Entity:Drug {entityId: 'DRUG-ACETAMINOPHEN'}) SET acet.name = 'Acetaminophen'
+MERGE (fever:Entity:Indication {entityId: 'IND-FEVER'}) SET fever.name = 'Fever'
+MERGE (f1:Fact {factId: 'DRUG-PARACETAMOL|TREATS|IND-FEVER'})
+SET f1.predicate = 'TREATS', f1.polarity = 'POSITIVE'
+MERGE (f2:Fact {factId: 'DRUG-ACETAMINOPHEN|TREATS|IND-FEVER'})
+SET f2.predicate = 'TREATS', f2.polarity = 'POSITIVE'
+MERGE (decision:ResolutionDecision {decisionId: 'DEC-MERGE-001'})
+ON CREATE SET decision.action = 'MERGE', decision.status = 'PROPOSED',
+              decision.method = 'ensemble', decision.resolverVersion = 'demo-resolver-v1',
+              decision.explanation = 'Trusted concept identifier agrees; names are known synonyms'
+MERGE (c1)-[:PART_OF]->(d1)
+MERGE (c2)-[:PART_OF]->(d2)
+MERGE (c1)-[:HAS_MENTION]->(m1)
+MERGE (c1)-[:HAS_MENTION]->(mf1)
+MERGE (c2)-[:HAS_MENTION]->(m2)
+MERGE (c2)-[:HAS_MENTION]->(mf2)
+MERGE (m1)-[rm1:RESOLVED_TO]->(para) SET rm1.method = 'initial-extraction'
+MERGE (m2)-[rm2:RESOLVED_TO]->(acet) SET rm2.method = 'initial-extraction'
+MERGE (mf1)-[rf1:RESOLVED_TO]->(fever) SET rf1.method = 'exact-name'
+MERGE (mf2)-[rf2:RESOLVED_TO]->(fever) SET rf2.method = 'exact-name'
+MERGE (f1)-[:SUBJECT]->(para)
+MERGE (f1)-[:OBJECT]->(fever)
+MERGE (f2)-[:SUBJECT]->(acet)
+MERGE (f2)-[:OBJECT]->(fever)
+MERGE (c1)-[s1:SUPPORTS {supportId: 'SUPPORT-1'}]->(f1)
+SET s1.subjectMentionId = 'M-PARA', s1.objectMentionId = 'M-FEVER-1', s1.confidence = 0.94
+MERGE (c2)-[s2:SUPPORTS {supportId: 'SUPPORT-2'}]->(f2)
+SET s2.subjectMentionId = 'M-ACET', s2.objectMentionId = 'M-FEVER-2', s2.confidence = 0.95
+MERGE (para)-[r1:TREATS {factId: f1.factId}]->(fever) SET r1.supportCount = 1
+MERGE (acet)-[r2:TREATS {factId: f2.factId}]->(fever) SET r2.supportCount = 1
+MERGE (decision)-[:SOURCE]->(para)
+MERGE (decision)-[:SELECTED]->(acet)
+MERGE (decision)-[considered:CONSIDERED]->(acet)
+SET considered.score = 0.99, considered.identifierMatch = true, considered.nameSimilarity = 0.62;
+",32,30,false
+Step 3 - Review the proposal,Inspect the proposed action selected survivor explanation and scored alternative.,"MATCH (decision:ResolutionDecision {decisionId: 'DEC-MERGE-001'})-[r]->(entity:Entity)
+RETURN decision.decisionId AS decisionId, decision.action AS action,
+       decision.status AS status, type(r) AS role, entity.entityId AS entityId,
+       r.score AS score, r.identifierMatch AS identifierMatch,
+       decision.explanation AS explanation;
+",33,30,false
+Step 4 - Accept and materialize the decision,Record human acceptance then update current identity Fact support and native projection.,"// Decision history is durable; these relationships are the fast current state.
+MATCH (decision:ResolutionDecision {decisionId: 'DEC-MERGE-001'}),
+      (m:EntityMention {mentionId: 'M-PARA'})-[old:RESOLVED_TO]->(para:Entity {entityId: 'DRUG-PARACETAMOL'}),
+      (acet:Entity {entityId: 'DRUG-ACETAMINOPHEN'})
+SET decision.status = 'ACCEPTED', decision.decidedBy = 'demo-reviewer',
+    decision.decidedAt = '2026-09-11T10:00:00Z'
+DELETE old
+MERGE (m)-[resolved:RESOLVED_TO]->(acet)
+SET resolved.decisionId = decision.decisionId
+MERGE (para)-[redirect:MERGED_INTO]->(acet)
+SET redirect.decisionId = decision.decisionId
+SET para.resolutionStatus = 'MERGED', acet.aliases = ['Paracetamol'];
+
+// Apply downstream post-processing only after the decision is accepted.
+MATCH (oldFact:Fact {factId: 'DRUG-PARACETAMOL|TREATS|IND-FEVER'}),
+      (canonicalFact:Fact {factId: 'DRUG-ACETAMINOPHEN|TREATS|IND-FEVER'})
+MATCH (c:Chunk)-[old:SUPPORTS]->(oldFact)
+WITH c, oldFact, canonicalFact, old, properties(old) AS support
+DELETE old
+MERGE (c)-[s:SUPPORTS {supportId: support.supportId}]->(canonicalFact)
+SET s = support;
+
+MATCH (oldFact:Fact {factId: 'DRUG-PARACETAMOL|TREATS|IND-FEVER'})
+DETACH DELETE oldFact;
+
+MATCH (:Entity {entityId: 'DRUG-PARACETAMOL'})-[old:TREATS]->()
+DELETE old;
+
+MATCH (f:Fact {factId: 'DRUG-ACETAMINOPHEN|TREATS|IND-FEVER'})-[:SUBJECT]->(drug:Drug),
+      (f)-[:OBJECT]->(indication:Indication)
+MERGE (drug)-[r:TREATS {factId: f.factId}]->(indication)
+WITH f, r
+MATCH (:Chunk)-[s:SUPPORTS]->(f)
+WITH r, count(s) AS supportCount
+SET r.supportCount = supportCount;
+",34,30,false
+Step 5 - Display accepted state,Show durable rationale beside the materialized canonical identity and query graph.,"MATCH (n)
+OPTIONAL MATCH (n)-[r]->(m)
+RETURN n, r, m;
+",35,30,false
+Step 6 - Query and cite,Return one application relationship with both supporting documents and its merge decision.,"MATCH (drug:Drug)-[r:TREATS]->(indication:Indication)
+MATCH (f:Fact {factId: r.factId})<-[s:SUPPORTS]-(c:Chunk)-[:PART_OF]->(d:Document)
+MATCH (c)-[:HAS_MENTION]->(mention:EntityMention)-[:RESOLVED_TO]->(drug)
+OPTIONAL MATCH (loser:Entity)-[redirect:MERGED_INTO]->(drug)
+OPTIONAL MATCH (decision:ResolutionDecision {decisionId: redirect.decisionId})
+RETURN drug.name AS subject, type(r) AS predicate, indication.name AS object,
+       d.documentId AS documentId, mention.surfaceForm AS extractedName,
+       decision.decisionId AS mergeDecision, decision.explanation AS rationale,
+       s.confidence AS factConfidence
+ORDER BY documentId;
+",36,30,false
+Step 7 - Supersede and split,Create a correction decision restore the old identity and separate downstream Fact support.,"// Never overwrite the accepted decision: supersede it with a new event.
+MATCH (merge:ResolutionDecision {decisionId: 'DEC-MERGE-001'}),
+      (para:Entity {entityId: 'DRUG-PARACETAMOL'})
+MERGE (split:ResolutionDecision {decisionId: 'DEC-SPLIT-001'})
+ON CREATE SET split.action = 'SPLIT', split.status = 'ACCEPTED',
+              split.method = 'human-review', split.resolverVersion = 'demo-resolver-v2',
+              split.explanation = 'Demo correction restores the pre-merge identities',
+              split.decidedBy = 'demo-reviewer', split.decidedAt = '2026-09-11T10:30:00Z'
+MERGE (split)-[:SOURCE]->(para)
+MERGE (split)-[:SELECTED]->(para)
+MERGE (split)-[:SUPERSEDES]->(merge)
+SET merge.status = 'SUPERSEDED';
+
+MATCH (split:ResolutionDecision {decisionId: 'DEC-SPLIT-001'}),
+      (m:EntityMention {mentionId: 'M-PARA'})-[old:RESOLVED_TO]->(:Entity {entityId: 'DRUG-ACETAMINOPHEN'}),
+      (para:Entity {entityId: 'DRUG-PARACETAMOL'})-[redirect:MERGED_INTO]->(acet:Entity {entityId: 'DRUG-ACETAMINOPHEN'})
+DELETE old, redirect
+MERGE (m)-[resolved:RESOLVED_TO]->(para)
+SET resolved.decisionId = split.decisionId
+SET para.resolutionStatus = 'CANONICAL', acet.aliases = [];
+
+MATCH (para:Entity {entityId: 'DRUG-PARACETAMOL'}),
+      (fever:Entity {entityId: 'IND-FEVER'})
+MERGE (f1:Fact {factId: 'DRUG-PARACETAMOL|TREATS|IND-FEVER'})
+SET f1.predicate = 'TREATS', f1.polarity = 'POSITIVE'
+MERGE (f1)-[:SUBJECT]->(para)
+MERGE (f1)-[:OBJECT]->(fever)
+WITH f1
+MATCH (c:Chunk)-[old:SUPPORTS]->(:Fact {factId: 'DRUG-ACETAMINOPHEN|TREATS|IND-FEVER'})
+WHERE old.subjectMentionId = 'M-PARA'
+WITH c, f1, old, properties(old) AS support
+DELETE old
+MERGE (c)-[s:SUPPORTS {supportId: support.supportId}]->(f1)
+SET s = support;
+
+MATCH (para:Entity {entityId: 'DRUG-PARACETAMOL'}),
+      (acet:Entity {entityId: 'DRUG-ACETAMINOPHEN'}),
+      (fever:Entity {entityId: 'IND-FEVER'}),
+      (f1:Fact {factId: 'DRUG-PARACETAMOL|TREATS|IND-FEVER'}),
+      (f2:Fact {factId: 'DRUG-ACETAMINOPHEN|TREATS|IND-FEVER'})
+MERGE (para)-[r1:TREATS {factId: f1.factId}]->(fever)
+MERGE (acet)-[r2:TREATS {factId: f2.factId}]->(fever)
+SET r1.supportCount = 1, r2.supportCount = 1;
+",37,30,false
+Step 8 - Inspect decision history,Follow the correction to the accepted merge decision it superseded.,"MATCH p=(split:ResolutionDecision {decisionId: 'DEC-SPLIT-001'})-[:SUPERSEDES]->(merge:ResolutionDecision)
+RETURN p, split.status AS currentDecisionStatus,
+       merge.status AS previousDecisionStatus;
+",38,30,false
+Step 9 - Display the audited split,Show the restored application graph while both merge and correction decisions remain.,"MATCH (n)
+OPTIONAL MATCH (n)-[r]->(m)
+RETURN n, r, m;
+",39,30,false
