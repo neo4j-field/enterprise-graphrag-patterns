@@ -70,3 +70,7 @@ Constraints created by one model may remain after its data is reset. This is har
 The Cypher favors clarity and visible lifecycle transitions over bulk-ingestion performance. Short comments explain important operations, while the READMEs contain the design rationale and production considerations.
 
 The examples deliberately show before-and-after states such as document deletion, entity merge, and entity split. These transitions explain why richer provenance and resolution structures exist more clearly than a final graph alone.
+
+## License
+
+Copyright 2026 Neo4j Sweden AB. Licensed under the [Apache License 2.0](LICENSE).
