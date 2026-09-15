@@ -86,6 +86,17 @@ The models are organized by when to use them and what capability they add. They 
 
 Two duplicate canonical nodes are physically consolidated. Mentions and Fact support are moved to a selected survivor, duplicate Facts are consolidated, and the losing entity is deleted.
 
+<table>
+  <tr>
+    <th align="center">Before the merge</th>
+    <th align="center">After the merge</th>
+  </tr>
+  <tr>
+    <td width="50%"><img src="imgs/1-3.png" alt="Two duplicate Drug entities with their chunks, Facts, and native relationships before the merge" width="100%"></td>
+    <td width="50%"><img src="imgs/1-6.png" alt="One canonical Drug, one Fact, and one native relationship supported by both chunks after the merge" width="100%"></td>
+  </tr>
+</table>
+
 **Use when:** identity is certain, upstream source records do not require their own graph identity, and restoring the exact pre-merge state is not an operational requirement.
 
 **What it adds:** the smallest graph and the simplest application queries.
@@ -101,6 +112,17 @@ This is the tempting baseline, not the recommended enterprise default.
 ```
 
 An `EntityMention` is one extraction occurrence. It retains the surface form, character offsets, proposed type, extracted identifiers, confidence, and extraction lineage. Canonical entities remain separate from those observations.
+
+<table>
+  <tr>
+    <th align="center">Before the merge</th>
+    <th align="center">After the merge</th>
+  </tr>
+  <tr>
+    <td width="50%"><img src="imgs/2-3.png" alt="Two Drug entities, each resolved from its own mention, with a pending candidate relationship before the merge" width="100%"></td>
+    <td width="50%"><img src="imgs/2-5.png" alt="Both mentions resolved to one canonical Drug, with the losing entity retained as a redirect after the merge" width="100%"></td>
+  </tr>
+</table>
 
 **Use when:** the project primarily resolves entities extracted from documents and needs incremental processing, ambiguity, or correction.
 
@@ -123,6 +145,17 @@ This is the recommended default for document-centric GraphRAG. The materialized 
 ```
 
 An identity cluster groups independently meaningful records believed to represent the same real-world entity. The canonical `Entity` is the current application representation of that cluster.
+
+<table>
+  <tr>
+    <th align="center">Before the merge</th>
+    <th align="center">After the merge</th>
+  </tr>
+  <tr>
+    <td width="50%"><img src="imgs/3-3.png" alt="Two identity clusters, each grouping one source record and one mention and materializing its own Drug, before the merge" width="100%"></td>
+    <td width="50%"><img src="imgs/3-6.png" alt="One identity cluster grouping both source records and both mentions and materializing one canonical Drug, with the old cluster retained as a redirect, after the merge" width="100%"></td>
+  </tr>
+</table>
 
 **Use when:** document extraction is reconciled with structured sources such as CRM, MDM, product catalogs, regulatory data, or external reference datasets, and those source records must remain independently addressable.
 
@@ -149,6 +182,17 @@ The demo includes a terminology record, a regulatory record, and document mentio
 ```
 
 A `ResolutionDecision` is the durable record of proposing, accepting, rejecting, merging, splitting, or superseding an identity assignment. Fast application and ingestion queries still use materialized current-state relationships.
+
+<table>
+  <tr>
+    <th align="center">After the accepted merge</th>
+    <th align="center">After the audited split</th>
+  </tr>
+  <tr>
+    <td width="50%"><img src="imgs/4-5.jpg" alt="The accepted merge decision with its rationale beside the materialized canonical Drug and query graph" width="100%"></td>
+    <td width="50%"><img src="imgs/4-9.jpg" alt="The restored two Drug identities while the split decision supersedes the retained merge decision" width="100%"></td>
+  </tr>
+</table>
 
 **Use when:** merges need human approval, explanations, correction history, rejected alternatives, resolver-version lineage, or regulatory audit. Tracking disagreement between several resolvers is one use case, but even one resolver benefits when consequential decisions must be reviewed and reversed.
 
